@@ -35,6 +35,8 @@ export type BuyerDetails = {
   instagram?: string
 }
 
+export type GuestGender = 'female' | 'male' | 'non_binary' | 'prefer_not_to_say'
+
 export type PaymentMethod = 'mpesa' | 'emola' | 'card'
 
 export type TicketLineItem = {
@@ -47,9 +49,15 @@ export type Order = {
   event: MzikEvent
   items: TicketLineItem[]
   buyer: BuyerDetails
+  guest?: {
+    gender: GuestGender
+    accessCode: string
+    inviteLabel: string
+  }
   paymentMethod: PaymentMethod
   subtotal: number
   serviceFee: number
   total: number
+  qrPayload?: string
   createdAt: string
 }

@@ -2,9 +2,11 @@ import { ArrowRight, CalendarDays, MapPin, Ticket } from 'lucide-react'
 import { Button } from './Button'
 import { Badge } from './Badge'
 import { featuredEvent } from '../data/events'
-import { formatMoney, getStartingPrice } from '../lib/pricing'
+import { scrollToInviteSection } from '../lib/inviteNavigation'
 
 export function HeroSection() {
+  const [eventYear = '2026', eventMonth = '07', eventDay = '12'] = featuredEvent.date.split('-')
+
   return (
     <section
       className="relative min-h-[calc(100svh-44px)] overflow-hidden border-b border-black bg-black text-white"
@@ -22,14 +24,14 @@ export function HeroSection() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-4xl font-light uppercase text-white md:text-5xl">MzikTV</p>
-            <p className="mt-2 text-xs font-semibold uppercase text-white/68">Tickets / first drop</p>
+            <p className="mt-2 text-xs font-semibold uppercase text-white/68">Tickets / invite drop</p>
           </div>
           <div className="hidden md:block">
-            <Button className="rounded-full px-4 py-3 text-base normal-case sm:px-7" to="/events" variant="light">
+            <Button className="rounded-full px-4 py-3 text-base normal-case sm:px-7" onClick={() => scrollToInviteSection()} variant="light">
               <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black text-white">
                 <Ticket size={22} />
               </span>
-              Buy tickets
+              Access invite
             </Button>
           </div>
         </div>
@@ -39,37 +41,37 @@ export function HeroSection() {
             <Badge tone="light">{featuredEvent.kicker}</Badge>
             <p className="mt-5 text-base leading-7 text-white/78">{featuredEvent.description}</p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button to={`/events/${featuredEvent.slug}/tickets`} variant="light">
-                Get tickets
+              <Button onClick={() => scrollToInviteSection()} variant="light">
+                Access invite
                 <ArrowRight size={16} />
               </Button>
-              <Button to={`/events/${featuredEvent.slug}`} variant="outline">
-                View details
+              <Button onClick={() => scrollToInviteSection()} variant="outline">
+                View ticket
               </Button>
             </div>
           </div>
 
           <div className="md:text-right">
             <h1 className="hero-display text-white">
-              Live
-              <span className="block text-white/72">Sessions</span>
+              Triunfo
+              <span className="block text-white/72">HouseParty</span>
             </h1>
             <p className="mt-5 max-w-2xl text-sm font-semibold uppercase text-white/62 md:ml-auto">
-              MzikTV live in Maputo / From {formatMoney(getStartingPrice(featuredEvent))}
+              Invite-only guest list / {featuredEvent.location}
             </p>
           </div>
         </div>
 
         <div className="grid gap-5 border-t border-white/35 pt-6 md:grid-cols-[1fr_auto_1fr] md:items-end">
           <div>
-            <p className="hero-meta">18/07</p>
+            <p className="hero-meta">{eventDay}/{eventMonth}</p>
             <p className="mt-2 flex items-center gap-2 text-sm uppercase text-white/62">
               <CalendarDays size={16} />
-              19:00
+              {featuredEvent.time}
             </p>
           </div>
           <div className="text-left md:text-center">
-            <p className="hero-meta">2026</p>
+            <p className="hero-meta">{eventYear}</p>
             <p className="mt-2 text-sm uppercase text-white/62">Limited seats available</p>
           </div>
           <div className="md:text-right">

@@ -12,9 +12,9 @@ export function CheckoutPage() {
       <main className="section-shell bg-white">
         <div className="mx-auto max-w-xl border border-black p-8 text-center">
           <h1 className="text-4xl font-semibold uppercase">No tickets selected</h1>
-          <p className="mt-3 text-sm text-black/60">Choose an event and ticket quantity before checkout.</p>
-          <Link className="mt-6 inline-flex border border-black bg-black px-5 py-3 text-sm font-semibold uppercase text-white" to="/events">
-            Browse events
+          <p className="mt-3 text-sm text-black/60">Use your invite code on the home page to unlock your ticket.</p>
+          <Link className="mt-6 inline-flex border border-black bg-black px-5 py-3 text-sm font-semibold uppercase text-white" to="/">
+            Return home
           </Link>
         </div>
       </main>

@@ -45,6 +45,20 @@ img {
   display: block;
 }
 
+[data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, 34px, 0);
+  transition:
+    opacity 680ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 680ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: opacity, transform;
+}
+
+[data-reveal].is-revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
 ::selection {
   background: #000000;
   color: #ffffff;
@@ -77,11 +91,35 @@ img {
     radial-gradient(circle at 18% 8%, rgba(183, 173, 227, 0.18), transparent 24%),
     radial-gradient(circle at 82% 4%, rgba(51, 79, 180, 0.24), transparent 22%),
     linear-gradient(180deg, #171717 0%, #0d0d0d 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.26);
   min-height: 460px;
   overflow: hidden;
   position: relative;
+  transition:
+    border-color 260ms ease,
+    box-shadow 260ms ease,
+    transform 260ms ease;
+  will-change: transform;
+}
+
+.ticket-pass:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  box-shadow: 0 26px 58px rgba(0, 0, 0, 0.38);
+  transform: translate3d(0, -6px, 0);
+}
+
+.ticket-pass-selected {
+  border-color: rgba(183, 173, 227, 0.72);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(183, 173, 227, 0.28),
+    0 0 46px rgba(183, 173, 227, 0.16);
+}
+
+.ticket-pass-added {
+  animation: ticket-pop 540ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (max-width: 639px) {
@@ -182,6 +220,47 @@ img {
   position: absolute;
 }
 
+.ticket-pass-shine::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  content: '';
+  height: 130%;
+  left: -42%;
+  opacity: 0;
+  position: absolute;
+  top: -15%;
+  transform: translateX(-120%) skewX(-18deg);
+  width: 34%;
+}
+
+.ticket-pass:hover .ticket-pass-shine::after,
+.ticket-pass-added .ticket-pass-shine::after {
+  animation: ticket-sweep 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ticket-add-button {
+  overflow: hidden;
+  position: relative;
+}
+
+.ticket-add-button::after {
+  background: rgba(0, 0, 0, 0.08);
+  content: '';
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+
+.ticket-add-button:hover::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
 .ticket-pass-name {
   color: rgba(255, 255, 255, 0.18);
   font-size: 1.05rem;
@@ -271,6 +350,55 @@ img {
   position: absolute;
 }
 
+.about-hero-image {
+  animation: about-hero-image 1800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center center;
+  will-change: transform, opacity;
+}
+
+.about-hero-copy {
+  animation: hero-copy-rise 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  opacity: 0;
+  transform: translate3d(0, 32px, 0);
+}
+
+.site-nav.is-visible {
+  animation: nav-drop 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.confirmation-check {
+  animation: confirmation-check 620ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both;
+  transform-origin: center;
+}
+
+.confirmation-kicker,
+.confirmation-title,
+.confirmation-copy {
+  animation: hero-copy-rise 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  opacity: 0;
+}
+
+.confirmation-kicker {
+  animation-delay: 180ms;
+}
+
+.confirmation-title {
+  animation-delay: 300ms;
+}
+
+.confirmation-copy {
+  animation-delay: 440ms;
+}
+
+.ticket-preview {
+  animation: ticket-stamp 760ms cubic-bezier(0.16, 1, 0.3, 1) 560ms both;
+  transform-origin: top center;
+}
+
+.ticket-preview-qr {
+  animation: qr-focus 820ms ease 1040ms both;
+}
+
 .hero-title {
   font-size: 5.5rem;
 }
@@ -352,6 +480,118 @@ img {
 
   to {
     transform: translateX(-50%);
+  }
+}
+
+@keyframes about-hero-image {
+  from {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+
+  to {
+    opacity: 0.72;
+    transform: scale(1);
+  }
+}
+
+@keyframes hero-copy-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 32px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes nav-drop {
+  from {
+    filter: blur(10px);
+    transform: translate3d(0, -100%, 0);
+  }
+
+  to {
+    filter: blur(0);
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes ticket-pop {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  42% {
+    transform: translate3d(0, -8px, 0) scale(1.015);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes ticket-sweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-120%) skewX(-18deg);
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(460%) skewX(-18deg);
+  }
+}
+
+@keyframes confirmation-check {
+  from {
+    opacity: 0;
+    transform: scale(0.62) rotate(-8deg);
+  }
+
+  62% {
+    opacity: 1;
+    transform: scale(1.12) rotate(2deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes ticket-stamp {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 42px, 0) rotateX(7deg) scale(0.96);
+  }
+
+  68% {
+    opacity: 1;
+    transform: translate3d(0, -5px, 0) rotateX(0) scale(1.012);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotateX(0) scale(1);
+  }
+}
+
+@keyframes qr-focus {
+  from {
+    filter: blur(2px);
+    transform: scale(0.96);
+  }
+
+  to {
+    filter: blur(0);
+    transform: scale(1);
   }
 }
 

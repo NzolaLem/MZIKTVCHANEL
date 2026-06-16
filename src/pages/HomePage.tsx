@@ -1,33 +1,70 @@
-import { ArrowRight, Camera, Clapperboard, Shirt, Sparkles } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Camera, Clapperboard, Shirt, Sparkles } from 'lucide-react'
 import { EventCard } from '../components/EventCard'
-import { EventGrid } from '../components/EventGrid'
 import { HeroSection } from '../components/HeroSection'
 import { InfiniteLookbookSection } from '../components/InfiniteLookbookSection'
+import { InviteAccessSection } from '../components/InviteAccessSection'
 import { Marquee } from '../components/Marquee'
 import { SectionHeader } from '../components/SectionHeader'
-import { TicketSelector } from '../components/TicketSelector'
-import { events, featuredEvent } from '../data/events'
-import { Button } from '../components/Button'
+import { featuredEvent } from '../data/events'
+import { inviteSectionId } from '../lib/inviteNavigation'
+
+const mainWebsiteSectionId = 'main-website'
 
 export function HomePage() {
+  const [isMainWebsiteVisible, setIsMainWebsiteVisible] = useState(false)
+
+  const enterMainWebsite = () => {
+    setIsMainWebsiteVisible(true)
+
+    window.setTimeout(() => {
+      document.getElementById(mainWebsiteSectionId)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
+  }
+
   return (
     <>
-      <Marquee />
-      <HeroSection />
-      <InfiniteLookbookSection />
+      <main className="bg-black text-white">
+        <section className="min-h-screen border-b border-white/10 bg-black">
+          <div className="section-shell flex min-h-screen flex-col justify-center">
+            <div className="mb-8 text-center">
+              <p className="mx-auto inline-flex bg-white px-3 py-2 text-xs font-semibold uppercase text-black">
+                Invite only
+              </p>
+              <h1 className="mx-auto mt-4 max-w-6xl text-5xl font-extrabold uppercase leading-[0.92] md:text-7xl lg:text-8xl">
+                Guest list access
+              </h1>
+              <p className="mx-auto mt-4 inline-flex border border-white/22 px-4 py-2 text-sm font-semibold uppercase text-white/72">
+                Mzik Off The Record
+              </p>
+              <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-white/58">
+                Enter your guest details and event code to unlock your ticket immediately.
+              </p>
+            </div>
+            <InviteAccessSection onContinue={enterMainWebsite} />
+          </div>
+        </section>
+      </main>
 
-      <main>
-        <section className="bg-black text-white">
-          <div className="section-shell">
-            <SectionHeader eyebrow="Featured event" title="The next MzikTV drop">
+      {isMainWebsiteVisible && (
+        <div id={mainWebsiteSectionId}>
+          <Marquee />
+          <HeroSection />
+          <InfiniteLookbookSection />
+
+          <main>
+            <section className="bg-black text-white">
+              <div className="section-shell">
+            <SectionHeader eyebrow="Featured event" title="Triunfo HouseParty">
               <span className="text-white/68">
-                MzikTV takes the clothing brand into real rooms: performances, pop-ups, screenings, and culture-first
-                nights with limited capacity.
+                Mzik Off The Record: an invite-only night in Triunfo with private guest-list access and limited capacity.
               </span>
             </SectionHeader>
             <div className="grid gap-5 lg:grid-cols-[1fr_0.82fr]">
-              <EventCard event={featuredEvent} featured />
+              <EventCard event={featuredEvent} featured inviteOnly />
               <div className="grid border border-white/18 bg-black p-5 text-white md:p-6 lg:p-7">
                 <div>
                   <p className="text-xs font-semibold uppercase text-white/55">What is MzikTV?</p>
@@ -64,38 +101,10 @@ export function HomePage() {
                 </div>
               </div>
             </div>
-
-            <div className="mt-8 py-8 text-white md:mt-10 md:py-10">
-              <div className="mb-8 text-center">
-                <p className="mx-auto inline-flex bg-white px-3 py-2 text-xs font-semibold uppercase text-black">
-                  Tickets
-                </p>
-                <h2 className="mx-auto mt-4 max-w-5xl text-4xl font-extrabold uppercase leading-[0.98] md:text-6xl">
-                  Ticket prices
-                </h2>
-                <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-white/58">
-                  Secure your spot for the next MzikTV drop. Choose your access and continue straight to checkout.
-                </p>
-              </div>
-              <TicketSelector compact event={featuredEvent} mobileDense />
-            </div>
           </div>
-        </section>
+            </section>
 
-        <section className="section-shell bg-mzik-stone">
-          <SectionHeader eyebrow="Browse tickets" title="Upcoming events">
-            Mock event data today, clean structure for real backend data tomorrow.
-          </SectionHeader>
-          <EventGrid events={events.slice(1, 4)} />
-          <div className="mt-8 flex justify-center">
-            <Button to="/events" variant="outline">
-              View all events
-              <ArrowRight size={16} />
-            </Button>
-          </div>
-        </section>
-
-        <section className="section-shell overflow-hidden bg-black text-white">
+            <section className="section-shell overflow-hidden bg-black text-white">
           <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
             <div>
               <p className="flex items-center gap-2 text-sm font-semibold uppercase text-white/55">
@@ -106,11 +115,11 @@ export function HomePage() {
                 Not just entry. A moment.
               </h2>
               <p className="mt-6 max-w-md text-sm leading-6 text-white/70">
-                Each purchase creates a branded digital confirmation, ticket preview, and mock order ID ready for
-                future QR verification.
+                Each invite creates a branded digital ticket, guest confirmation, and QR code ready for future
+                verification at the door.
               </p>
             </div>
-            <Link className="group grid grid-cols-3 gap-2" to="/events">
+            <a className="group grid grid-cols-3 gap-2" href={`#${inviteSectionId}`}>
               {['lookbook-06.jpg', 'lookbook-07.jpg', 'lookbook-09.jpg'].map((image, index) => (
                 <img
                   alt=""
@@ -120,10 +129,12 @@ export function HomePage() {
                   style={{ transform: `translateY(${index === 1 ? '-28px' : '0px'})` }}
                 />
               ))}
-            </Link>
+            </a>
           </div>
-        </section>
-      </main>
+            </section>
+          </main>
+        </div>
+      )}
     </>
   )
 }

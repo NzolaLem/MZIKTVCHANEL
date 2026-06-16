@@ -1,21 +1,33 @@
 import { Menu, Ticket, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Button } from './Button'
 import { cn } from '../lib/cn'
+import { scrollToInviteSection } from '../lib/inviteNavigation'
 
 const navItems = [
   { label: 'Home', to: '/' },
-  { label: 'Events', to: '/events' },
-  { label: 'About', to: '/about' },
 ]
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
   const [hasPassedHero, setHasPassedHero] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
   const isHome = location.pathname === '/'
   const isVisible = !isHome || hasPassedHero || isOpen
+
+  const openInviteAccess = () => {
+    setIsOpen(false)
+
+    if (!isHome) {
+      navigate('/')
+      window.setTimeout(() => scrollToInviteSection(), 80)
+      return
+    }
+
+    scrollToInviteSection()
+  }
 
   useEffect(() => {
     if (!isHome) {
@@ -44,8 +56,8 @@ export function Navbar() {
     <>
       <header
         className={cn(
-          'fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-black/92 text-white backdrop-blur transition duration-300',
-          isVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-full opacity-0',
+          'site-nav fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-black/92 text-white backdrop-blur transition duration-300',
+          isVisible ? 'is-visible translate-y-0 opacity-100' : 'pointer-events-none -translate-y-full opacity-0',
         )}
       >
         <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-4 sm:px-6 lg:px-10">
@@ -75,9 +87,9 @@ export function Navbar() {
           </nav>
 
           <div className="hidden items-center gap-3 md:flex">
-            <Button className="min-h-10 rounded-full px-5 py-2 normal-case" to="/events" variant="light">
+            <Button className="min-h-10 rounded-full px-5 py-2 normal-case" onClick={openInviteAccess} variant="light">
               <Ticket size={18} />
-              Buy tickets
+              Access invite
             </Button>
           </div>
 
@@ -105,6 +117,10 @@ export function Navbar() {
                 </NavLink>
               ))}
             </nav>
+            <Button className="mt-4 w-full" onClick={openInviteAccess} variant="light">
+              <Ticket size={18} />
+              Access invite
+            </Button>
           </div>
         )}
       </header>

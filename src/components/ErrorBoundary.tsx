@@ -37,10 +37,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             <p className="text-sm font-semibold uppercase text-white/55">Something went wrong</p>
             <h1 className="mt-4 text-4xl font-semibold uppercase leading-none">This page needs a refresh</h1>
             <p className="mt-4 text-sm leading-6 text-white/65">
-              The app hit a rendering issue. Return to events and try the flow again.
+              The app hit a rendering issue. Return home and try the invite flow again.
             </p>
-            <Button className="mt-6" to="/events" variant="light">
-              Browse events
+            <Button className="mt-6" to="/" variant="light">
+              Return home
             </Button>
           </div>
         </main>

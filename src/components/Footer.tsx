@@ -1,10 +1,10 @@
 import { Camera, Music2, Play } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { inviteSectionId } from '../lib/inviteNavigation'
 
 const footerLinks = [
   { label: 'Home', to: '/' },
-  { label: 'Events', to: '/events' },
-  { label: 'About', to: '/about' },
+  { label: 'Access invite', to: `#${inviteSectionId}` },
   { label: 'Mzik store', to: 'https://mzik.store/' },
 ]
 
@@ -21,7 +21,7 @@ export function Footer() {
             </div>
           </div>
           <p className="mt-6 max-w-md text-sm leading-6 text-white/70">
-            Ticket access for MzikTV experiences, live sessions, pop-ups, screenings, and fashion-connected
+            Invite-only ticket access for MzikTV experiences, live sessions, pop-ups, screenings, and fashion-connected
             cultural nights.
           </p>
         </div>
@@ -32,6 +32,10 @@ export function Footer() {
             {footerLinks.map((link) =>
               link.to.startsWith('http') ? (
                 <a className="hover:text-white" href={link.to} key={link.label} rel="noopener noreferrer" target="_blank">
+                  {link.label}
+                </a>
+              ) : link.to.startsWith('#') ? (
+                <a className="hover:text-white" href={link.to} key={link.label}>
                   {link.label}
                 </a>
               ) : (
@@ -65,7 +69,7 @@ export function Footer() {
         </div>
       </div>
       <div className="border-t border-white/20 px-4 py-4 text-center text-xs uppercase text-white/50">
-        2026 MzikTV Tickets. Mock MVP, ready for payment and backend integration later.
+        2026 MzikTV Tickets. Invite-only MVP, ready for backend verification later.
       </div>
     </footer>
   )

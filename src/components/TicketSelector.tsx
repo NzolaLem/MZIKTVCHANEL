@@ -22,6 +22,7 @@ export function TicketSelector({
   const { setDraftOrder } = useOrder()
   const [quantities, setQuantities] = useState<TicketQuantityMap>({})
   const [error, setError] = useState('')
+  const [animatedTicketId, setAnimatedTicketId] = useState('')
 
   const items = useMemo(() => quantitiesToLineItems(event, quantities), [event, quantities])
   const isEventSoldOut = event.status === 'sold-out' || getTotalAvailability(event) <= 0
@@ -59,9 +60,15 @@ export function TicketSelector({
             isEventSoldOut={isEventSoldOut}
             isMobileDense={mobileDense}
             key={ticketType.id}
-            onAdd={() =>
+            isAdded={animatedTicketId === ticketType.id}
+            isSelected={(quantities[ticketType.id] ?? 0) > 0}
+            onAdd={() => {
               updateQuantity(ticketType.id, Math.min(ticketType.available, (quantities[ticketType.id] ?? 0) + 1))
-            }
+              setAnimatedTicketId(ticketType.id)
+              window.setTimeout(() => {
+                setAnimatedTicketId((current) => (current === ticketType.id ? '' : current))
+              }, 540)
+            }}
             onCheckout={continueToCheckout}
             onQuantityChange={(quantity) => updateQuantity(ticketType.id, quantity)}
             quantity={quantities[ticketType.id] ?? 0}
@@ -99,6 +106,8 @@ function TicketPass({
   stubDate,
   isEventSoldOut,
   isMobileDense,
+  isSelected,
+  isAdded,
   onQuantityChange,
   onAdd,
   onCheckout,
@@ -109,6 +118,8 @@ function TicketPass({
   stubDate: string
   isEventSoldOut: boolean
   isMobileDense: boolean
+  isSelected: boolean
+  isAdded: boolean
   onQuantityChange: (quantity: number) => void
   onAdd: () => void
   onCheckout: () => void
@@ -116,7 +127,14 @@ function TicketPass({
   const isTicketSoldOut = isEventSoldOut || ticketType.available <= 0
 
   return (
-    <article className={cn('ticket-pass flex h-full flex-col', isMobileDense && 'ticket-pass-mobile-dense')}>
+    <article
+      className={cn(
+        'ticket-pass flex h-full flex-col',
+        isMobileDense && 'ticket-pass-mobile-dense',
+        isSelected && 'ticket-pass-selected',
+        isAdded && 'ticket-pass-added',
+      )}
+    >
       <div className="ticket-pass-shine" />
       <div className="ticket-pass-top" />
       <div
@@ -184,7 +202,7 @@ function TicketPass({
         </div>
         <button
           className={cn(
-            'bg-white px-5 py-2 font-black uppercase text-black transition hover:bg-mzik-lavender disabled:cursor-not-allowed disabled:opacity-35',
+            'ticket-add-button bg-white px-5 py-2 font-black uppercase text-black transition hover:bg-mzik-lavender disabled:cursor-not-allowed disabled:opacity-35',
             isMobileDense ? 'min-h-9 text-xs sm:min-h-10 sm:text-sm' : 'min-h-10 text-sm',
           )}
           disabled={isTicketSoldOut}

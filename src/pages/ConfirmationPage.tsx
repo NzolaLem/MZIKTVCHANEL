@@ -17,10 +17,10 @@ export function ConfirmationPage() {
         <div className="mx-auto max-w-xl border border-black p-8 text-center">
           <h1 className="text-4xl font-semibold uppercase">Ticket not found</h1>
           <p className="mt-3 text-sm text-black/60">
-            This MVP keeps confirmation data in the browser session. Complete checkout again to generate a ticket.
+            This MVP keeps confirmation data in the browser session. Return home and unlock your ticket again.
           </p>
-          <Button className="mt-6" to="/events" variant="dark">
-            Browse events
+          <Button className="mt-6" to="/" variant="dark">
+            Return home
           </Button>
         </div>
       </main>
@@ -33,10 +33,14 @@ export function ConfirmationPage() {
       <main className="bg-black text-white">
         <section className="section-shell">
           <div className="mx-auto max-w-5xl text-center">
-            <CheckCircle2 className="mx-auto" size={54} />
-            <p className="mt-5 text-sm font-semibold uppercase text-white/55">Purchase confirmed</p>
-            <h1 className="mt-3 text-5xl font-semibold uppercase leading-[0.9] md:text-8xl">You are on the list</h1>
-            <p className="mx-auto mt-5 max-w-2xl text-sm leading-6 text-white/68">
+            <CheckCircle2 className="confirmation-check mx-auto" size={54} />
+            <p className="confirmation-kicker mt-5 text-sm font-semibold uppercase text-white/55">
+              Purchase confirmed
+            </p>
+            <h1 className="confirmation-title mt-3 text-5xl font-semibold uppercase leading-[0.9] md:text-8xl">
+              You are on the list
+            </h1>
+            <p className="confirmation-copy mx-auto mt-5 max-w-2xl text-sm leading-6 text-white/68">
               {order.buyer.fullName}, your {getTicketCount(order.items)} ticket(s) for {order.event.title} are confirmed.
               Total paid: {formatMoney(order.total)}.
             </p>

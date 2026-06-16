@@ -5,6 +5,7 @@ import { Badge } from './Badge'
 import { formatMoney, getStartingPrice, getTotalAvailability } from '../lib/pricing'
 import { cn } from '../lib/cn'
 import { formatEventDate } from '../lib/dates'
+import { inviteSectionId } from '../lib/inviteNavigation'
 
 const statusLabel = {
   available: 'Available',
@@ -18,12 +19,39 @@ const statusTone = {
   'sold-out': 'danger',
 } as const
 
-export function EventCard({ event, featured = false }: { event: MzikEvent; featured?: boolean }) {
+export function EventCard({
+  event,
+  featured = false,
+  inviteOnly = false,
+}: {
+  event: MzikEvent
+  featured?: boolean
+  inviteOnly?: boolean
+}) {
   const date = formatEventDate(event.date, {
     month: 'short',
     day: '2-digit',
     year: 'numeric',
   })
+  const media = (
+    <img
+      alt={event.title}
+      className={
+        featured
+          ? 'h-[360px] w-full object-cover transition duration-500 group-hover:scale-105 md:h-[430px]'
+          : 'h-80 w-full object-cover transition duration-500 group-hover:scale-105'
+      }
+      src={event.image}
+    />
+  )
+  const actionClass = cn(
+    'inline-flex items-center justify-between border px-4 py-3 text-sm font-semibold uppercase transition',
+    featured
+      ? 'border-white bg-white text-black hover:bg-mzik-lavender'
+      : 'border-black bg-black text-white hover:bg-white hover:text-black',
+  )
+  const startingPrice = getStartingPrice(event)
+  const totalAvailability = getTotalAvailability(event)
 
   return (
     <article
@@ -32,19 +60,17 @@ export function EventCard({ event, featured = false }: { event: MzikEvent; featu
         featured
           ? 'border-white/18 bg-black text-white hover:shadow-[8px_8px_0_#b7ade3]'
           : 'border-black bg-white hover:shadow-[8px_8px_0_#000]',
-      )}
+        )}
     >
-      <Link className="block overflow-hidden" to={`/events/${event.slug}`}>
-        <img
-          alt={event.title}
-          className={
-            featured
-              ? 'h-[360px] w-full object-cover transition duration-500 group-hover:scale-105 md:h-[430px]'
-              : 'h-80 w-full object-cover transition duration-500 group-hover:scale-105'
-          }
-          src={event.image}
-        />
-      </Link>
+      {inviteOnly ? (
+        <a className="block overflow-hidden" href={`#${inviteSectionId}`}>
+          {media}
+        </a>
+      ) : (
+        <Link className="block overflow-hidden" to={`/events/${event.slug}`}>
+          {media}
+        </Link>
+      )}
       <div className={cn('grid', featured ? 'gap-4 p-4 md:p-5' : 'gap-5 p-5')}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Badge tone={statusTone[event.status]}>{statusLabel[event.status]}</Badge>
@@ -79,26 +105,27 @@ export function EventCard({ event, featured = false }: { event: MzikEvent; featu
         </div>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className={cn('text-xs uppercase', featured ? 'text-white/45' : 'text-black/55')}>Starting at</p>
-            <p className="text-xl font-semibold">{formatMoney(getStartingPrice(event))}</p>
+            <p className={cn('text-xs uppercase', featured ? 'text-white/45' : 'text-black/55')}>
+              {inviteOnly && startingPrice === 0 ? 'Access' : 'Starting at'}
+            </p>
+            <p className="text-xl font-semibold">{inviteOnly && startingPrice === 0 ? 'Invite only' : formatMoney(startingPrice)}</p>
           </div>
           <div className="text-right">
-            <p className={cn('text-xs uppercase', featured ? 'text-white/45' : 'text-black/55')}>Left</p>
-            <p className="text-xl font-semibold">{getTotalAvailability(event)}</p>
+            <p className={cn('text-xs uppercase', featured ? 'text-white/45' : 'text-black/55')}>Guest spots</p>
+            <p className="text-xl font-semibold">{totalAvailability}</p>
           </div>
         </div>
-        <Link
-          className={cn(
-            'inline-flex items-center justify-between border px-4 py-3 text-sm font-semibold uppercase transition',
-            featured
-              ? 'border-white bg-white text-black hover:bg-mzik-lavender'
-              : 'border-black bg-black text-white hover:bg-white hover:text-black',
-          )}
-          to={`/events/${event.slug}`}
-        >
-          View details
-          <ArrowRight size={16} />
-        </Link>
+        {inviteOnly ? (
+          <a className={actionClass} href={`#${inviteSectionId}`}>
+            Access invite
+            <ArrowRight size={16} />
+          </a>
+        ) : (
+          <Link className={actionClass} to={`/events/${event.slug}`}>
+            View details
+            <ArrowRight size={16} />
+          </Link>
+        )}
       </div>
     </article>
   )
