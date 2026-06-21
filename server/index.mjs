@@ -1,28 +1,25 @@
 import { createServer } from 'node:http'
 import { existsSync, createReadStream } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash, createHmac, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
-import { tmpdir } from 'node:os'
-import { extname, join, resolve } from 'node:path'
+import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { createClient } from '@supabase/supabase-js'
 
 const scrypt = promisify(scryptCallback)
 const rootDirectory = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const isVercelRuntime = process.env.VERCEL === '1'
-const dataDirectory = process.env.DATA_DIRECTORY
-  ? resolve(process.env.DATA_DIRECTORY)
-  : isVercelRuntime
-    ? join(tmpdir(), 'mzik-ticket-data')
-    : join(rootDirectory, 'server', 'data')
-const databasePath = join(dataDirectory, 'db.json')
 const distDirectory = join(rootDirectory, 'dist')
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? 8787)
 const tokenSecret = process.env.TOKEN_SECRET ?? 'dev-mzik-ticket-secret-change-before-production'
 const adminPassword = process.env.ADMIN_PASSWORD ?? 'mzik-admin-dev'
 const tokenIssuer = 'mzik-ticket-api'
-let databaseMutationQueue = Promise.resolve()
 const validGenders = new Set(['female', 'male', 'non_binary', 'prefer_not_to_say'])
+const isProduction = process.env.NODE_ENV === 'production'
+
+const supabaseProjectId = cleanEnv(process.env.SUPABASE_PROJECT_ID)
+const supabaseUrl = cleanEnv(process.env.SUPABASE_URL) || (supabaseProjectId ? `https://${supabaseProjectId}.supabase.co` : '')
+const supabaseServiceKey = cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY) || cleanEnv(process.env.SUPABASE_SECRET_KEY)
+let supabaseClient = null
 
 const event = {
   id: 'evt-triunfo-houseparty',
@@ -106,7 +103,15 @@ const seedGuests = [
   },
 ]
 
-await initializeDatabase()
+if (hasSupabaseConfig()) {
+  try {
+    await ensureSeedGuests()
+  } catch (error) {
+    console.error('Could not seed demo guests at startup:', error)
+  }
+} else {
+  console.warn('Supabase seed skipped: database configuration is incomplete.')
+}
 
 export async function handleRequest(request, response) {
   try {
@@ -124,7 +129,11 @@ export async function handleRequest(request, response) {
 
     await serveStaticFile(response, url)
   } catch (error) {
-    console.error(error)
+    if (error.isConfigurationError) {
+      console.error(error.publicMessage)
+    } else {
+      console.error(error)
+    }
     writeJson(response, error.statusCode ?? 500, { error: error.publicMessage ?? 'Internal server error.' })
   }
 }
@@ -139,8 +148,15 @@ if (isDirectRun()) {
 }
 
 async function routeApiRequest(request, response, url) {
+  assertProductionSecrets()
+
   if (request.method === 'GET' && url.pathname === '/api/health') {
-    writeJson(response, 200, { ok: true, service: 'mzik-ticket-api' })
+    const database = await getDatabaseHealth()
+    writeJson(response, database.ok ? 200 : 503, {
+      ok: database.ok,
+      service: 'mzik-ticket-api',
+      database,
+    })
     return
   }
 
@@ -161,8 +177,8 @@ async function routeApiRequest(request, response, url) {
 
   if (request.method === 'GET' && url.pathname === '/api/admin/guests') {
     await requireAdmin(request)
-    const database = await readDatabaseForResponse()
-    writeJson(response, 200, { guests: database.guests.map(sanitizeGuest) })
+    const guests = await listGuests()
+    writeJson(response, 200, { guests: guests.map(sanitizeGuest) })
     return
   }
 
@@ -181,8 +197,8 @@ async function routeApiRequest(request, response, url) {
 
   if (request.method === 'GET' && url.pathname === '/api/admin/checkins') {
     await requireAdmin(request)
-    const database = await readDatabaseForResponse()
-    writeJson(response, 200, { checkins: database.checkins })
+    const checkins = await listCheckins()
+    writeJson(response, 200, { checkins })
     return
   }
 
@@ -213,31 +229,20 @@ async function verifyInviteRequest(request, response) {
     return
   }
 
-  const result = await mutateDatabase(async (database) => {
-    const guest = database.guests.find(
-      (candidate) =>
-        candidate.normalizedName === normalizedName && candidate.gender === gender && normalizeInviteCode(candidate.accessCode) === accessCode,
-    )
+  const guest = await findGuest({ normalizedName, gender, accessCode })
 
-    if (!guest || !(await verifyPassword(password, guest.passwordHash))) {
-      return { status: 401, payload: { error: 'These invite details do not match the guest list.' } }
-    }
+  if (!guest || !(await verifyPassword(password, guest.passwordHash))) {
+    writeJson(response, 401, { error: 'These invite details do not match the guest list.' })
+    return
+  }
 
-    if (guest.checkedInAt) {
-      return { status: 409, payload: { error: 'This guest is already checked in.' } }
-    }
+  if (guest.checkedInAt) {
+    writeJson(response, 409, { error: 'This guest is already checked in.' })
+    return
+  }
 
-    const ticket = issueOrReuseTicket(database, guest)
-
-    return {
-      status: 200,
-      payload: {
-        order: createOrder(guest, ticket),
-      },
-    }
-  })
-
-  writeJson(response, result.status, result.payload)
+  const ticket = await issueOrReuseTicket(guest)
+  writeJson(response, 200, { order: createOrder(guest, ticket) })
 }
 
 async function loginAdminRequest(request, response) {
@@ -255,6 +260,7 @@ async function loginAdminRequest(request, response) {
 }
 
 async function createGuestRequest(request, response) {
+  const supabase = getSupabase()
   const body = await readJsonBody(request)
   const fullName = cleanDisplayName(String(body.fullName ?? ''))
   const normalizedName = normalizeGuestName(fullName)
@@ -278,61 +284,65 @@ async function createGuestRequest(request, response) {
     return
   }
 
-  const result = await mutateDatabase(async (database) => {
-    const duplicate = database.guests.some(
-      (guest) => guest.normalizedName === normalizedName && normalizeInviteCode(guest.accessCode) === accessCode,
-    )
+  const guestRow = {
+    id: `guest-${randomUUID()}`,
+    full_name: fullName,
+    normalized_name: normalizedName,
+    gender,
+    access_code: accessCode,
+    event_slug: event.slug,
+    ticket_type_id: ticketTypeId,
+    invite_label: getInviteLabel(ticketTypeId),
+    source: 'admin',
+    password_hash: await hashPassword(password),
+    created_at: new Date().toISOString(),
+    checked_in_at: null,
+  }
 
-    if (duplicate) {
-      return { status: 409, payload: { error: 'This guest already has this invite code.' } }
+  const { data, error } = await supabase.from('guests').insert(guestRow).select().single()
+
+  if (error) {
+    if (error.code === '23505') {
+      writeJson(response, 409, { error: 'This guest already has this invite code.' })
+      return
     }
 
-    const guest = {
-      id: `guest-${randomUUID()}`,
-      fullName,
-      normalizedName,
-      gender,
-      accessCode,
-      eventSlug: event.slug,
-      ticketTypeId,
-      inviteLabel: getInviteLabel(ticketTypeId),
-      source: 'admin',
-      passwordHash: await hashPassword(password),
-      createdAt: new Date().toISOString(),
-      checkedInAt: null,
-    }
+    throw databaseError(error)
+  }
 
-    database.guests.push(guest)
-    return { status: 201, payload: { guest: sanitizeGuest(guest), temporaryPassword: password } }
-  })
-
-  writeJson(response, result.status, result.payload)
+  writeJson(response, 201, { guest: sanitizeGuest(rowToGuest(data)), temporaryPassword: password })
 }
 
 async function deleteGuestRequest(response, guestId) {
-  const result = await mutateDatabase(async (database) => {
-    const guest = database.guests.find((candidate) => candidate.id === guestId)
+  const supabase = getSupabase()
+  const { data: guest, error: lookupError } = await supabase.from('guests').select('id, source').eq('id', guestId).maybeSingle()
 
-    if (!guest) {
-      return { status: 404, payload: { error: 'Guest not found.' } }
-    }
+  if (lookupError) {
+    throw databaseError(lookupError)
+  }
 
-    if (guest.source === 'seed') {
-      return { status: 403, payload: { error: 'Seed guests cannot be deleted.' } }
-    }
+  if (!guest) {
+    writeJson(response, 404, { error: 'Guest not found.' })
+    return
+  }
 
-    const deletedTicketIds = new Set(database.tickets.filter((ticket) => ticket.guestId === guestId).map((ticket) => ticket.id))
-    database.guests = database.guests.filter((candidate) => candidate.id !== guestId)
-    database.tickets = database.tickets.filter((ticket) => ticket.guestId !== guestId)
-    database.checkins = database.checkins.filter((checkin) => checkin.guestId !== guestId && !deletedTicketIds.has(checkin.ticketId))
+  if (guest.source === 'seed') {
+    writeJson(response, 403, { error: 'Seed guests cannot be deleted.' })
+    return
+  }
 
-    return { status: 200, payload: { ok: true } }
-  })
+  // tickets and checkins are removed by the on delete cascade foreign keys.
+  const { error: deleteError } = await supabase.from('guests').delete().eq('id', guestId)
 
-  writeJson(response, result.status, result.payload)
+  if (deleteError) {
+    throw databaseError(deleteError)
+  }
+
+  writeJson(response, 200, { ok: true })
 }
 
 async function checkInTicketRequest(request, response) {
+  const supabase = getSupabase()
   const body = await readJsonBody(request)
   const ticketToken = String(body.ticketToken ?? '').trim()
   const payload = verifySignedToken(ticketToken, 'ticket')
@@ -342,48 +352,85 @@ async function checkInTicketRequest(request, response) {
     return
   }
 
-  const result = await mutateDatabase(async (database) => {
-    const tokenHash = hashTicketToken(ticketToken)
-    const ticket = database.tickets.find((candidate) => candidate.id === payload.ticketId && candidate.tokenHash === tokenHash)
-    const guest = ticket ? database.guests.find((candidate) => candidate.id === ticket.guestId) : null
+  const { data: ticket, error: ticketError } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('id', payload.ticketId)
+    .eq('token_hash', hashTicketToken(ticketToken))
+    .maybeSingle()
 
-    if (!ticket || !guest) {
-      return { status: 404, payload: { error: 'Ticket was not found.' } }
-    }
+  if (ticketError) {
+    throw databaseError(ticketError)
+  }
 
-    if (ticket.checkedInAt || guest.checkedInAt) {
-      return {
-        status: 409,
-        payload: {
-          error: 'Guest is already checked in.',
-          guest: sanitizeGuest(guest),
-          checkedInAt: ticket.checkedInAt ?? guest.checkedInAt,
-        },
-      }
-    }
+  const guest = ticket ? await findGuestById(ticket.guest_id) : null
 
-    const checkedInAt = new Date().toISOString()
-    ticket.checkedInAt = checkedInAt
-    guest.checkedInAt = checkedInAt
-    database.checkins.push({
-      id: `checkin-${randomUUID()}`,
-      ticketId: ticket.id,
-      guestId: guest.id,
-      eventId: event.id,
-      checkedInAt,
+  if (!ticket || !guest) {
+    writeJson(response, 404, { error: 'Ticket was not found.' })
+    return
+  }
+
+  if (ticket.checked_in_at || guest.checkedInAt) {
+    writeJson(response, 409, {
+      error: 'Guest is already checked in.',
+      guest: sanitizeGuest(guest),
+      checkedInAt: ticket.checked_in_at ?? guest.checkedInAt,
     })
+    return
+  }
 
-    return {
-      status: 200,
-      payload: {
-        ok: true,
-        guest: sanitizeGuest(guest),
-        checkedInAt,
-      },
-    }
+  const checkedInAt = new Date().toISOString()
+
+  const { data: updatedTicket, error: ticketUpdateError } = await supabase
+    .from('tickets')
+    .update({ checked_in_at: checkedInAt })
+    .eq('id', ticket.id)
+    .is('checked_in_at', null)
+    .select('id')
+    .maybeSingle()
+  if (ticketUpdateError) {
+    throw databaseError(ticketUpdateError)
+  }
+
+  if (!updatedTicket) {
+    writeJson(response, 409, {
+      error: 'Guest is already checked in.',
+      guest: sanitizeGuest(guest),
+      checkedInAt: ticket.checked_in_at ?? guest.checkedInAt,
+    })
+    return
+  }
+
+  const { error: guestUpdateError } = await supabase.from('guests').update({ checked_in_at: checkedInAt }).eq('id', guest.id)
+  if (guestUpdateError) {
+    throw databaseError(guestUpdateError)
+  }
+
+  const { error: checkinError } = await supabase.from('checkins').insert({
+    id: `checkin-${randomUUID()}`,
+    ticket_id: ticket.id,
+    guest_id: guest.id,
+    event_id: event.id,
+    checked_in_at: checkedInAt,
   })
+  if (checkinError) {
+    if (checkinError.code === '23505') {
+      writeJson(response, 409, {
+        error: 'Guest is already checked in.',
+        guest: sanitizeGuest({ ...guest, checkedInAt }),
+        checkedInAt,
+      })
+      return
+    }
 
-  writeJson(response, result.status, result.payload)
+    throw databaseError(checkinError)
+  }
+
+  writeJson(response, 200, {
+    ok: true,
+    guest: sanitizeGuest({ ...guest, checkedInAt }),
+    checkedInAt,
+  })
 }
 
 async function requireAdmin(request) {
@@ -401,42 +448,117 @@ async function requireAdmin(request) {
   return payload
 }
 
-function issueOrReuseTicket(database, guest) {
-  const reusableTicket = database.tickets.find(
-    (candidate) => candidate.guestId === guest.id && candidate.eventId === event.id && !candidate.checkedInAt && candidate.tokenVersion === 2,
-  )
+async function listGuests() {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('guests').select('*').order('created_at', { ascending: true })
 
-  if (reusableTicket) {
-    const ticketToken = createTicketToken(reusableTicket)
-    reusableTicket.tokenHash = hashTicketToken(ticketToken)
-
-    return {
-      ...reusableTicket,
-      token: ticketToken,
-    }
+  if (error) {
+    throw databaseError(error)
   }
 
-  const ticketId = `ticket-${randomUUID()}`
-  const issuedAt = new Date().toISOString()
+  return data.map(rowToGuest)
+}
+
+async function listCheckins() {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('checkins').select('*').order('checked_in_at', { ascending: false })
+
+  if (error) {
+    throw databaseError(error)
+  }
+
+  return data.map((row) => ({
+    id: row.id,
+    ticketId: row.ticket_id,
+    guestId: row.guest_id,
+    eventId: row.event_id,
+    checkedInAt: row.checked_in_at,
+  }))
+}
+
+async function findGuest({ normalizedName, gender, accessCode }) {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('guests')
+    .select('*')
+    .eq('normalized_name', normalizedName)
+    .eq('gender', gender)
+    .eq('access_code', accessCode)
+    .maybeSingle()
+
+  if (error) {
+    throw databaseError(error)
+  }
+
+  return data ? rowToGuest(data) : null
+}
+
+async function findGuestById(guestId) {
+  const supabase = getSupabase()
+  const { data, error } = await supabase.from('guests').select('*').eq('id', guestId).maybeSingle()
+
+  if (error) {
+    throw databaseError(error)
+  }
+
+  return data ? rowToGuest(data) : null
+}
+
+async function issueOrReuseTicket(guest) {
+  const supabase = getSupabase()
+  const { data: reusable, error: reusableError } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('guest_id', guest.id)
+    .eq('event_id', event.id)
+    .is('checked_in_at', null)
+    .eq('token_version', 2)
+    .limit(1)
+    .maybeSingle()
+
+  if (reusableError) {
+    throw databaseError(reusableError)
+  }
+
+  if (reusable) {
+    const ticketToken = createTicketToken(rowToTicket(reusable))
+    const { error: updateError } = await supabase
+      .from('tickets')
+      .update({ token_hash: hashTicketToken(ticketToken) })
+      .eq('id', reusable.id)
+
+    if (updateError) {
+      throw databaseError(updateError)
+    }
+
+    return { ...rowToTicket(reusable), token: ticketToken }
+  }
+
   const ticket = {
-    id: ticketId,
+    id: `ticket-${randomUUID()}`,
     guestId: guest.id,
     eventId: event.id,
-    issuedAt,
+    issuedAt: new Date().toISOString(),
     checkedInAt: null,
     tokenVersion: 2,
   }
   const ticketToken = createTicketToken(ticket)
-  const persistedTicket = {
-    ...ticket,
-    tokenHash: hashTicketToken(ticketToken),
+
+  const { error: insertError } = await supabase.from('tickets').insert({
+    id: ticket.id,
+    guest_id: ticket.guestId,
+    event_id: ticket.eventId,
+    issued_at: ticket.issuedAt,
+    checked_in_at: null,
+    token_hash: hashTicketToken(ticketToken),
+    token_version: ticket.tokenVersion,
+  })
+
+  if (insertError) {
+    throw databaseError(insertError)
   }
 
-  database.tickets.push(persistedTicket)
-  return {
-    ...persistedTicket,
-    token: ticketToken,
-  }
+  return { ...ticket, token: ticketToken }
 }
 
 function createTicketToken(ticket) {
@@ -476,7 +598,6 @@ function createOrder(guest, ticket) {
       accessCode: guest.accessCode,
       inviteLabel: guest.inviteLabel,
     },
-    paymentMethod: 'card',
     subtotal: 0,
     serviceFee: 0,
     total: 0,
@@ -485,70 +606,54 @@ function createOrder(guest, ticket) {
   }
 }
 
-async function initializeDatabase() {
-  await mkdir(dataDirectory, { recursive: true })
-  const database = existsSync(databasePath)
-    ? await readDatabase()
-    : {
-        version: 1,
-        guests: [],
-        tickets: [],
-        checkins: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
+async function ensureSeedGuests() {
+  const supabase = getSupabase()
+  const rows = []
 
   for (const seedGuest of seedGuests) {
-    if (!database.guests.some((guest) => guest.id === seedGuest.id)) {
-      database.guests.push({
-        ...omit(seedGuest, ['password']),
-        normalizedName: normalizeGuestName(seedGuest.fullName),
-        accessCode: normalizeInviteCode(seedGuest.accessCode),
-        passwordHash: await hashPassword(seedGuest.password),
-        checkedInAt: null,
-      })
-    }
+    rows.push({
+      id: seedGuest.id,
+      full_name: seedGuest.fullName,
+      normalized_name: normalizeGuestName(seedGuest.fullName),
+      gender: seedGuest.gender,
+      access_code: normalizeInviteCode(seedGuest.accessCode),
+      event_slug: seedGuest.eventSlug,
+      ticket_type_id: seedGuest.ticketTypeId,
+      invite_label: seedGuest.inviteLabel,
+      source: 'seed',
+      password_hash: await hashPassword(seedGuest.password),
+      created_at: seedGuest.createdAt,
+      checked_in_at: null,
+    })
   }
 
-  await writeDatabase(database)
+  // ignoreDuplicates keeps the existing seed rows (and their stable password
+  // hashes) untouched, so we only insert seeds that are missing.
+  const { error } = await supabase.from('guests').upsert(rows, { onConflict: 'id', ignoreDuplicates: true })
+
+  if (error) {
+    throw databaseError(error)
+  }
 }
 
-async function readDatabase() {
-  try {
-    const rawDatabase = await readFile(databasePath, 'utf8')
-    return JSON.parse(rawDatabase)
-  } catch {
+async function getDatabaseHealth() {
+  const supabase = getSupabase()
+  const { error } = await supabase.from('guests').select('id').limit(1)
+
+  if (error) {
+    console.error('Supabase health check failed:', error)
     return {
-      version: 1,
-      guests: [],
-      tickets: [],
-      checkins: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      ok: false,
+      table: 'guests',
+      error: error.message ?? 'Database check failed.',
     }
   }
-}
 
-async function readDatabaseForResponse() {
-  await databaseMutationQueue.catch(() => {})
-  return readDatabase()
-}
-
-async function writeDatabase(database) {
-  database.updatedAt = new Date().toISOString()
-  await writeFile(databasePath, `${JSON.stringify(database, null, 2)}\n`, 'utf8')
-}
-
-async function mutateDatabase(mutator) {
-  const nextMutation = databaseMutationQueue.then(async () => {
-    const database = await readDatabase()
-    const result = await mutator(database)
-    await writeDatabase(database)
-    return result
-  })
-
-  databaseMutationQueue = nextMutation.catch(() => {})
-  return nextMutation
+  return {
+    ok: true,
+    table: 'guests',
+    reachable: true,
+  }
 }
 
 async function hashPassword(password) {
@@ -667,7 +772,8 @@ function writeJson(response, statusCode, payload) {
 async function serveStaticFile(response, url) {
   const requestedPath = url.pathname === '/' ? '/index.html' : url.pathname
   const filePath = resolve(join(distDirectory, requestedPath))
-  const safeFilePath = filePath.startsWith(distDirectory) && existsSync(filePath) ? filePath : join(distDirectory, 'index.html')
+  const isInsideDist = filePath === distDirectory || filePath.startsWith(`${distDirectory}${sep}`)
+  const safeFilePath = isInsideDist && existsSync(filePath) ? filePath : join(distDirectory, 'index.html')
 
   if (!existsSync(safeFilePath)) {
     response.writeHead(404, { 'Content-Type': 'text/plain' })
@@ -693,6 +799,35 @@ function getContentType(filePath) {
   return 'application/octet-stream'
 }
 
+function rowToGuest(row) {
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    normalizedName: row.normalized_name,
+    gender: row.gender,
+    accessCode: row.access_code,
+    eventSlug: row.event_slug,
+    ticketTypeId: row.ticket_type_id,
+    inviteLabel: row.invite_label,
+    source: row.source,
+    passwordHash: row.password_hash,
+    createdAt: row.created_at,
+    checkedInAt: row.checked_in_at ?? null,
+  }
+}
+
+function rowToTicket(row) {
+  return {
+    id: row.id,
+    guestId: row.guest_id,
+    eventId: row.event_id,
+    issuedAt: row.issued_at,
+    checkedInAt: row.checked_in_at ?? null,
+    tokenVersion: row.token_version,
+    tokenHash: row.token_hash,
+  }
+}
+
 function sanitizeGuest(guest) {
   return {
     id: guest.id,
@@ -707,6 +842,59 @@ function sanitizeGuest(guest) {
     checkedInAt: guest.checkedInAt ?? null,
     passwordStatus: 'Set',
   }
+}
+
+function getSupabase() {
+  if (!hasSupabaseConfig()) {
+    throw configurationError(
+      'Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY in the backend environment.',
+    )
+  }
+
+  supabaseClient ??= createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+
+  return supabaseClient
+}
+
+function hasSupabaseConfig() {
+  return Boolean(supabaseUrl && supabaseServiceKey)
+}
+
+function assertProductionSecrets() {
+  if (isProduction && (!cleanEnv(process.env.ADMIN_PASSWORD) || !cleanEnv(process.env.TOKEN_SECRET))) {
+    throw configurationError('Production secrets are not configured. Add ADMIN_PASSWORD and TOKEN_SECRET in the backend environment.')
+  }
+}
+
+function configurationError(publicMessage) {
+  const error = new Error(publicMessage)
+  error.statusCode = 503
+  error.publicMessage = publicMessage
+  error.isConfigurationError = true
+  return error
+}
+
+function databaseError(error) {
+  console.error('Supabase error:', error)
+  const wrapped = new Error(error?.message ?? 'Database error')
+  wrapped.statusCode = 500
+  wrapped.publicMessage =
+    error?.code === 'PGRST205'
+      ? 'The Supabase database tables are not set up yet. Run supabase/schema.sql in the Supabase SQL Editor.'
+      : 'A database error occurred.'
+  return wrapped
+}
+
+function cleanEnv(value) {
+  const nextValue = String(value ?? '').trim()
+
+  if (!nextValue || nextValue.includes('replace-with') || nextValue.includes('your-project-ref')) {
+    return ''
+  }
+
+  return nextValue
 }
 
 function normalizeInviteCode(code) {
@@ -740,10 +928,6 @@ function timingSafeStringEqual(left, right) {
   }
 
   return timingSafeEqual(leftBuffer, rightBuffer)
-}
-
-function omit(object, keys) {
-  return Object.fromEntries(Object.entries(object).filter(([key]) => !keys.includes(key)))
 }
 
 function isDirectRun() {

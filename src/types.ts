@@ -19,6 +19,7 @@ export type MzikEvent = {
   location: string
   venue: string
   image: string
+  posterImage?: string
   accent: string
   status: EventStatus
   description: string
@@ -37,8 +38,6 @@ export type BuyerDetails = {
 
 export type GuestGender = 'female' | 'male' | 'non_binary' | 'prefer_not_to_say'
 
-export type PaymentMethod = 'mpesa' | 'emola' | 'card'
-
 export type TicketLineItem = {
   ticketType: TicketType
   quantity: number
@@ -54,7 +53,6 @@ export type Order = {
     accessCode: string
     inviteLabel: string
   }
-  paymentMethod: PaymentMethod
   subtotal: number
   serviceFee: number
   total: number

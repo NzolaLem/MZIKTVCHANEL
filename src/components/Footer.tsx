@@ -69,7 +69,7 @@ export function Footer() {
         </div>
       </div>
       <div className="border-t border-white/20 px-4 py-4 text-center text-xs uppercase text-white/50">
-        2026 MzikTV Tickets. Invite-only MVP, ready for backend verification later.
+        2026 MzikTV Tickets. Invite-only access with backend ticket verification.
       </div>
     </footer>
   )

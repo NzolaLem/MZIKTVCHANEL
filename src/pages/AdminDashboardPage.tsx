@@ -1,19 +1,22 @@
-import { KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2, UsersRound } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type HTMLInputTypeAttribute } from 'react'
+import { CheckCircle2, KeyRound, Loader2, LockKeyhole, Plus, QrCode, RefreshCw, ScanLine, ShieldCheck, Trash2, UsersRound } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type HTMLInputTypeAttribute } from 'react'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { featuredEvent } from '../data/events'
 import type { GuestGender } from '../types'
 import {
   ApiError,
+  checkInTicket,
   deleteAdminGuest,
   generateGuestPassword,
+  getCheckinList,
   getGuestList,
   loginAdmin,
   normalizeGuestName,
   normalizeInviteCode,
   saveAdminGuest,
   type AdminSession,
+  type CheckinRecord,
   type RegisteredGuest,
 } from '../data/invites'
 import { formatEventDate } from '../lib/dates'
@@ -37,6 +40,20 @@ type AdminGuestForm = {
 }
 
 type AdminErrors = Partial<Record<keyof AdminGuestForm | 'form', string>>
+type CheckinMessage = {
+  tone: 'success' | 'error'
+  text: string
+}
+
+type BarcodeDetectorResult = {
+  rawValue?: string
+}
+
+type BarcodeDetectorInstance = {
+  detect: (source: HTMLVideoElement) => Promise<BarcodeDetectorResult[]>
+}
+
+type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => BarcodeDetectorInstance
 
 export function AdminDashboardPage() {
   const [session, setSession] = useState<AdminSession | null>(() => readStoredSession())
@@ -45,7 +62,11 @@ export function AdminDashboardPage() {
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isLoadingGuests, setIsLoadingGuests] = useState(false)
   const [isCreatingGuest, setIsCreatingGuest] = useState(false)
+  const [isCheckingIn, setIsCheckingIn] = useState(false)
   const [guests, setGuests] = useState<RegisteredGuest[]>([])
+  const [checkins, setCheckins] = useState<CheckinRecord[]>([])
+  const [ticketToken, setTicketToken] = useState('')
+  const [checkinMessage, setCheckinMessage] = useState<CheckinMessage | null>(null)
   const [lastTemporaryPassword, setLastTemporaryPassword] = useState('')
   const [form, setForm] = useState<AdminGuestForm>(() => ({
     fullName: '',
@@ -121,6 +142,22 @@ export function AdminDashboardPage() {
     }
   }, [logout, session?.token])
 
+  const refreshCheckins = useCallback(async (token = session?.token) => {
+    if (!token) {
+      return
+    }
+
+    try {
+      setCheckins(await getCheckinList(token))
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        logout()
+      } else {
+        setCheckinMessage({ tone: 'error', text: getErrorMessage(error) })
+      }
+    }
+  }, [logout, session?.token])
+
   useEffect(() => {
     if (!session?.token) {
       return
@@ -128,12 +165,49 @@ export function AdminDashboardPage() {
 
     const frame = window.setTimeout(() => {
       void refreshGuests(session.token)
+      void refreshCheckins(session.token)
     }, 0)
 
     return () => {
       window.clearTimeout(frame)
     }
-  }, [refreshGuests, session?.token])
+  }, [refreshCheckins, refreshGuests, session?.token])
+
+  const submitCheckin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!session?.token) {
+      return
+    }
+
+    const nextTicketToken = ticketToken.trim()
+
+    if (!nextTicketToken) {
+      setCheckinMessage({ tone: 'error', text: 'Scan or paste a ticket QR token first.' })
+      return
+    }
+
+    setIsCheckingIn(true)
+
+    try {
+      const result = await checkInTicket(nextTicketToken, session.token)
+      setTicketToken('')
+      setCheckinMessage({
+        tone: 'success',
+        text: `${result.guest.fullName} checked in at ${formatCheckinTime(result.checkedInAt)}.`,
+      })
+      await Promise.all([refreshGuests(session.token), refreshCheckins(session.token)])
+    } catch (error) {
+      setCheckinMessage({ tone: 'error', text: getErrorMessage(error) })
+    } finally {
+      setIsCheckingIn(false)
+    }
+  }
+
+  const handleScannedTicketToken = useCallback((value: string) => {
+    setTicketToken(value)
+    setCheckinMessage({ tone: 'success', text: 'QR captured. Press check in to verify this ticket.' })
+  }, [])
 
   const createGuest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -205,8 +279,13 @@ export function AdminDashboardPage() {
       return
     }
 
-    await deleteAdminGuest(guestId, session.token)
-    setGuests(await getGuestList(session.token))
+    try {
+      await deleteAdminGuest(guestId, session.token)
+      setGuests(await getGuestList(session.token))
+      setErrors({})
+    } catch (error) {
+      setErrors({ form: getErrorMessage(error) })
+    }
   }
 
   if (!session) {
@@ -265,7 +344,14 @@ export function AdminDashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Button disabled={isLoadingGuests} onClick={() => void refreshGuests()} variant="outline">
+            <Button
+              disabled={isLoadingGuests}
+              onClick={() => {
+                void refreshGuests()
+                void refreshCheckins()
+              }}
+              variant="outline"
+            >
               {isLoadingGuests ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
               Refresh
             </Button>
@@ -382,6 +468,52 @@ export function AdminDashboardPage() {
           </form>
 
           <section className="grid gap-5">
+            <form className="grid gap-4 border border-black bg-white p-5 md:p-6" onSubmit={submitCheckin}>
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="inline-flex items-center gap-2 bg-black px-3 py-2 text-xs font-semibold uppercase text-white">
+                    <QrCode size={15} />
+                    Door check-in
+                  </p>
+                  <h2 className="mt-4 text-3xl font-semibold uppercase leading-none">Scan ticket QR</h2>
+                  <p className="mt-3 text-sm leading-6 text-black/60">
+                    Scan from camera or paste the QR token to mark one guest as checked in.
+                  </p>
+                </div>
+                <CameraQrScanner disabled={isCheckingIn} onDetect={handleScannedTicketToken} />
+              </div>
+
+              <label className="grid gap-2" htmlFor="admin-ticket-token">
+                <span className="text-xs font-semibold uppercase text-black/65">Ticket QR token</span>
+                <textarea
+                  className="min-h-24 resize-y border border-black bg-white px-4 py-3 font-mono text-xs outline-none transition placeholder:text-black/35 focus:bg-mzik-lavender/40"
+                  id="admin-ticket-token"
+                  onChange={(event) => {
+                    setTicketToken(event.target.value)
+                    setCheckinMessage(null)
+                  }}
+                  placeholder="Paste scanned QR token"
+                  value={ticketToken}
+                />
+              </label>
+
+              {checkinMessage && (
+                <p
+                  className={cn(
+                    'border px-4 py-3 text-sm font-semibold',
+                    checkinMessage.tone === 'success' ? 'border-black bg-mzik-lavender/40 text-black' : 'border-mzik-red bg-mzik-red text-white',
+                  )}
+                >
+                  {checkinMessage.text}
+                </p>
+              )}
+
+              <Button className="w-full" disabled={isCheckingIn} type="submit" variant="dark">
+                {isCheckingIn ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+                Check in guest
+              </Button>
+            </form>
+
             <div className="grid gap-3 md:grid-cols-3">
               {guestStats.map((stat) => (
                 <div className="border border-black bg-white p-4" key={stat.label}>
@@ -389,6 +521,31 @@ export function AdminDashboardPage() {
                   <p className="mt-2 text-4xl font-semibold uppercase">{stat.value}</p>
                 </div>
               ))}
+            </div>
+
+            <div className="border border-black bg-white">
+              <div className="flex items-center justify-between gap-4 border-b border-black p-4">
+                <h2 className="flex items-center gap-2 text-sm font-semibold uppercase">
+                  <CheckCircle2 size={18} />
+                  Recent check-ins
+                </h2>
+              </div>
+              <div className="grid">
+                {checkins.length > 0 ? (
+                  checkins.slice(0, 6).map((checkin) => {
+                    const guest = guests.find((candidate) => candidate.id === checkin.guestId)
+
+                    return (
+                      <article className="grid gap-1 border-b border-black p-4 last:border-b-0" key={checkin.id}>
+                        <p className="text-sm font-semibold uppercase">{guest?.fullName ?? checkin.guestId}</p>
+                        <p className="text-xs font-semibold uppercase text-black/50">{formatCheckinTime(checkin.checkedInAt)}</p>
+                      </article>
+                    )
+                  })
+                ) : (
+                  <p className="p-4 text-sm font-semibold uppercase text-black/50">No guests checked in yet.</p>
+                )}
+              </div>
             </div>
 
             <div className="border border-black bg-white">
@@ -428,6 +585,135 @@ export function AdminDashboardPage() {
       </section>
     </main>
   )
+}
+
+function CameraQrScanner({
+  disabled,
+  onDetect,
+}: {
+  disabled: boolean
+  onDetect: (value: string) => void
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const frameRef = useRef<number | null>(null)
+  const [isOpen, setIsOpen] = useState(false)
+  const [status, setStatus] = useState('')
+  const isSupported = Boolean(getBarcodeDetector() && navigator.mediaDevices?.getUserMedia)
+
+  const stopScanner = useCallback(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setIsOpen(false)
+  }, [])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    let isCancelled = false
+
+    const startScanner = async () => {
+      const BarcodeDetector = getBarcodeDetector()
+
+      if (!BarcodeDetector) {
+        setStatus('Camera QR scanning is not supported in this browser.')
+        return
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+        })
+
+        if (isCancelled) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        streamRef.current = stream
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+
+        const detector = new BarcodeDetector({ formats: ['qr_code'] })
+        setStatus('Point the camera at the ticket QR code.')
+
+        const scanFrame = async () => {
+          if (!videoRef.current) {
+            return
+          }
+
+          try {
+            const codes = await detector.detect(videoRef.current)
+            const value = codes.find((code) => code.rawValue)?.rawValue?.trim()
+
+            if (value) {
+              onDetect(value)
+              stopScanner()
+              return
+            }
+          } catch {
+            setStatus('Still scanning. Hold the QR code steady in the frame.')
+          }
+
+          frameRef.current = window.requestAnimationFrame(() => {
+            void scanFrame()
+          })
+        }
+
+        frameRef.current = window.requestAnimationFrame(() => {
+          void scanFrame()
+        })
+      } catch {
+        if (!isCancelled) {
+          setStatus('Camera permission is needed. You can paste the scanned token instead.')
+        }
+      }
+    }
+
+    void startScanner()
+
+    return () => {
+      isCancelled = true
+      stopScanner()
+    }
+  }, [isOpen, onDetect, stopScanner])
+
+  if (!isSupported) {
+    return (
+      <p className="border border-black px-4 py-3 text-xs font-semibold uppercase text-black/55">
+        Camera scanner unavailable. Paste scanned token.
+      </p>
+    )
+  }
+
+  return (
+    <div className="grid gap-3 md:min-w-56">
+      <Button disabled={disabled} onClick={() => (isOpen ? stopScanner() : setIsOpen(true))} variant="outline">
+        <ScanLine size={16} />
+        {isOpen ? 'Stop scanner' : 'Start scanner'}
+      </Button>
+      {isOpen && (
+        <div className="grid gap-2">
+          <video className="aspect-video w-full border border-black bg-black object-cover" muted playsInline ref={videoRef} />
+          {status && <p className="text-xs font-semibold uppercase text-black/55">{status}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function getBarcodeDetector() {
+  return (window as Window & { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector
 }
 
 function AdminField({
@@ -522,4 +808,19 @@ function getErrorMessage(error: unknown) {
   }
 
   return 'Something went wrong.'
+}
+
+function formatCheckinTime(value: string) {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }

@@ -14,6 +14,20 @@ export type RegisteredGuest = {
   passwordStatus: string
 }
 
+export type CheckinRecord = {
+  id: string
+  ticketId: string
+  guestId: string
+  eventId: string
+  checkedInAt: string
+}
+
+export type CheckinResult = {
+  ok: true
+  guest: RegisteredGuest
+  checkedInAt: string
+}
+
 export type AdminGuestInput = {
   fullName: string
   gender: GuestGender
@@ -102,6 +116,22 @@ export async function getGuestList(token: string) {
   return data.guests
 }
 
+export async function getCheckinList(token: string) {
+  const data = await apiRequest<{ checkins: CheckinRecord[] }>('/api/admin/checkins', {
+    token,
+  })
+
+  return data.checkins
+}
+
+export async function checkInTicket(ticketToken: string, token: string) {
+  return apiRequest<CheckinResult>('/api/checkins', {
+    method: 'POST',
+    token,
+    body: { ticketToken },
+  })
+}
+
 export async function saveAdminGuest(input: AdminGuestInput, token: string) {
   return apiRequest<{ guest: RegisteredGuest; temporaryPassword: string }>('/api/admin/guests', {
     method: 'POST',
@@ -139,10 +169,22 @@ async function apiRequest<ResponseBody>(
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
   const text = await response.text()
-  const data = text ? (JSON.parse(text) as { error?: string }) : {}
+  let data: { error?: string } = {}
+
+  if (text) {
+    try {
+      data = JSON.parse(text) as { error?: string }
+    } catch {
+      if (!response.ok) {
+        throw new ApiError(`The API returned an unexpected response with status ${response.status}.`, response.status)
+      }
+
+      throw new Error('The API returned an unexpected response.')
+    }
+  }
 
   if (!response.ok) {
-    throw new ApiError(data.error || 'Request failed.', response.status)
+    throw new ApiError(data.error || `Request failed with status ${response.status}.`, response.status)
   }
 
   return data as ResponseBody

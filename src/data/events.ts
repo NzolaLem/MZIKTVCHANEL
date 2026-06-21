@@ -13,6 +13,7 @@ export const events: MzikEvent[] = [
     location: 'Triunfo, Maputo',
     venue: 'Private HouseParty Location',
     image: `${assets}/lookbook-05.jpg`,
+    posterImage: `${assets}/MZIKPOSTER.jpeg`,
     accent: '#b7ade3',
     status: 'available',
     description:

@@ -2,38 +2,61 @@
 
 This backend runs the invite-only guest list flow for Triunfo HouseParty.
 
+## One-time Supabase setup
+
+1. In the Supabase dashboard open **SQL Editor → New query**, paste the contents of
+   [`supabase/schema.sql`](../supabase/schema.sql), and **Run** it. This creates the
+   `guests`, `tickets`, and `checkins` tables.
+2. Copy `.env.example` to `.env` and fill in the values (see below).
+
 ## Run locally
 
 ```sh
-npm run dev:api
+npm run db:check
 npm run dev
 ```
 
-The API runs on `http://127.0.0.1:8787`. Vite proxies `/api` requests to it during local development.
+`npm run dev` starts both the API and the Vite website. The API runs on
+`http://127.0.0.1:8787`, and Vite proxies `/api` requests to it during local development.
+`npm run db:check`, `npm run dev`, and `npm run dev:api` load `.env` automatically.
 
-## Required production env vars
+## Required env vars
 
 ```sh
 ADMIN_PASSWORD=replace-with-a-strong-admin-password
 TOKEN_SECRET=replace-with-a-long-random-token-secret
 API_PORT=8787
+SUPABASE_PROJECT_ID=lzepyzvisjkwnytxopmd
+SUPABASE_URL=https://lzepyzvisjkwnytxopmd.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=replace-with-your-server-only-key
 ```
 
-`ADMIN_PASSWORD` protects the admin dashboard. `TOKEN_SECRET` signs admin sessions and QR ticket tokens.
+- `ADMIN_PASSWORD` protects the admin dashboard.
+- `TOKEN_SECRET` signs admin sessions and QR ticket tokens.
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` come from the Supabase dashboard
+  (Project Settings → Data API / API Keys). The server-only key is a secret —
+  it is only ever used server-side and must never be exposed to the browser or
+  prefixed with `VITE_`.
+
+On Vercel, set these same variables in **Project Settings → Environment Variables**.
 
 ## Storage
 
-The MVP uses `server/data/db.json`, which is ignored by git. Guest passwords are hashed with `scrypt`; raw guest passwords are only returned once when an admin creates a guest.
+Guests, tickets, and check-ins are stored in Supabase (Postgres). Guest passwords are hashed
+with `scrypt`; raw guest passwords are only returned once when an admin creates a guest. The
+three demo "seed" guests are upserted on startup so the table is never empty.
 
-For a real deployed party workflow, replace the JSON file with Postgres, Supabase, or another durable database so multiple admins and deployments share the same guest list.
+Row Level Security is enabled on all tables with no policies, so the public/anon key cannot
+read guest data — only the server's service-role key (which bypasses RLS) can.
 
-On Vercel, this backend runs through `api/[...path].mjs`. The API routes will work, but Vercel's local filesystem is temporary for serverless functions, so admin-created guests should not be treated as durable production data until a database is attached.
+On Vercel, this backend runs through `api/[...path].mjs`. Because all state now lives in
+Supabase, admin-created guests persist across deployments and serverless cold starts.
 
 ## API routes
 
 `GET /api/health`
 
-Checks that the backend is running.
+Checks that the backend is running and can reach the `guests` table in Supabase.
 
 `GET /api/event`
 
