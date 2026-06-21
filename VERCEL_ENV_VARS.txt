@@ -1,31 +1,19 @@
-Use these in Vercel:
+Add these exact Environment Variables in Vercel.
 
-Project Settings -> Environment Variables -> Add
+Project Settings -> Environment Variables -> Add Environment Variable
 
-ADMIN_PASSWORD
-Value:
-choose-a-private-password-for-the-admin-dashboard
+Do not create variables named "Value" or "Important".
 
-TOKEN_SECRET
-Value:
-use-a-long-random-secret-text-here
-
-SUPABASE_PROJECT_ID
-Value:
-lzepyzvisjkwnytxopmd
-
-SUPABASE_URL
-Value:
-https://lzepyzvisjkwnytxopmd.supabase.co
-
-SUPABASE_SERVICE_ROLE_KEY
-Value:
-paste-your-new-rotated-supabase-secret-key-here
+ADMIN_PASSWORD=choose-a-private-password-for-the-admin-dashboard
+TOKEN_SECRET=use-a-long-random-secret-text-here
+SUPABASE_PROJECT_ID=lzepyzvisjkwnytxopmd
+SUPABASE_URL=https://lzepyzvisjkwnytxopmd.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=paste-your-new-rotated-supabase-secret-key-here
 
 Important:
+- Add each line above as one separate Vercel variable.
+- The text before "=" is the Vercel variable name.
+- The text after "=" is the Vercel value.
 - Do not add API_PORT in Vercel.
 - Do not name the Supabase service key VITE_SUPABASE_SERVICE_ROLE_KEY.
-- The Supabase service key must stay server-side only.
-- Because the old Supabase key was pasted in chat, rotate it in Supabase and paste the new one here.
-
-For local development only, copy .env.example to .env and fill in the same values.
+- Because the old Supabase key was pasted in chat, rotate it in Supabase and paste the new one as SUPABASE_SERVICE_ROLE_KEY.
