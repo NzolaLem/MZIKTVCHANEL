@@ -29,32 +29,22 @@ export function HomePage() {
     <>
       <main className="bg-black text-white">
         <section className="min-h-screen border-b border-white/10 bg-black">
-          <div className="section-shell grid min-h-screen gap-8 lg:grid-cols-[minmax(320px,0.82fr)_minmax(0,1.18fr)] lg:items-center">
-            <aside className="mx-auto w-full max-w-[520px] lg:max-w-none">
-              <img
-                alt="Mzik TV HouseParty illustrated event poster"
-                className="max-h-[calc(100svh-7rem)] w-full border border-white/20 bg-black object-contain shadow-[10px_10px_0_rgba(255,255,255,0.12)]"
-                src={featuredEvent.posterImage}
-              />
-            </aside>
-
-            <div>
-              <div className="mb-8 text-center lg:text-left">
-                <p className="inline-flex bg-white px-3 py-2 text-xs font-semibold uppercase text-black">
-                  Invite only
-                </p>
-                <h1 className="mt-4 max-w-5xl text-5xl font-extrabold uppercase leading-[0.92] md:text-7xl lg:text-8xl">
-                  Guest list access
-                </h1>
-                <p className="mt-4 inline-flex border border-white/22 px-4 py-2 text-sm font-semibold uppercase text-white/72">
-                  Mzik Off The Record
-                </p>
-                <p className="mt-5 max-w-2xl text-base leading-7 text-white/58 lg:max-w-xl">
-                  Enter your guest details and event code to unlock your ticket immediately.
-                </p>
-              </div>
-              <InviteAccessSection layout="stacked" onContinue={enterMainWebsite} />
+          <div className="section-shell flex min-h-screen flex-col justify-center">
+            <div className="mb-8 text-center">
+              <p className="mx-auto inline-flex bg-white px-3 py-2 text-xs font-semibold uppercase text-black">
+                Invite only
+              </p>
+              <h1 className="mx-auto mt-4 max-w-6xl text-5xl font-extrabold uppercase leading-[0.92] md:text-7xl lg:text-8xl">
+                Guest list access
+              </h1>
+              <p className="mx-auto mt-4 inline-flex border border-white/22 px-4 py-2 text-sm font-semibold uppercase text-white/72">
+                Mzik Off The Record
+              </p>
+              <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-white/58">
+                Enter your guest details and event code to unlock your ticket immediately.
+              </p>
             </div>
+            <InviteAccessSection onContinue={enterMainWebsite} />
           </div>
         </section>
       </main>

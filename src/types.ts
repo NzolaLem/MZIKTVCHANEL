@@ -19,7 +19,6 @@ export type MzikEvent = {
   location: string
   venue: string
   image: string
-  posterImage?: string
   accent: string
   status: EventStatus
   description: string

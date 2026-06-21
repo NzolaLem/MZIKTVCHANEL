@@ -30,13 +30,7 @@ type StoredInviteAccess = {
 
 const inviteAccessStorageKey = 'mzik-invite-access-v1'
 
-export function InviteAccessSection({
-  layout = 'split',
-  onContinue,
-}: {
-  layout?: 'split' | 'stacked'
-  onContinue?: (order: Order) => void
-}) {
+export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order) => void }) {
   const [storedInviteAccess] = useState(() => readStoredInviteAccess())
   const [form, setForm] = useState<InviteFormState>(storedInviteAccess?.form ?? initialForm)
   const [errors, setErrors] = useState<FormErrors>({})
@@ -126,7 +120,7 @@ export function InviteAccessSection({
 
   return (
     <section className="scroll-mt-24" id={inviteSectionId}>
-      <div className={cn('grid gap-5', layout === 'split' && 'lg:grid-cols-[0.72fr_1.28fr] lg:items-start')}>
+      <div className="grid gap-5 lg:grid-cols-[0.72fr_1.28fr] lg:items-start">
         <form className="grid gap-5 border border-white/18 bg-white p-5 text-black md:p-6" onSubmit={submit}>
           <div>
             <p className="inline-flex items-center gap-2 bg-black px-3 py-2 text-xs font-semibold uppercase text-white">
