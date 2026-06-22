@@ -1,5 +1,6 @@
 import { CheckCircle2, KeyRound, Loader2, LockKeyhole, Plus, QrCode, RefreshCw, ScanLine, ShieldCheck, Trash2, UsersRound } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type HTMLInputTypeAttribute } from 'react'
+import jsQR from 'jsqr'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { featuredEvent } from '../data/events'
@@ -49,16 +50,6 @@ type CheckinMessage = {
   tone: 'success' | 'error'
   text: string
 }
-
-type BarcodeDetectorResult = {
-  rawValue?: string
-}
-
-type BarcodeDetectorInstance = {
-  detect: (source: HTMLVideoElement) => Promise<BarcodeDetectorResult[]>
-}
-
-type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => BarcodeDetectorInstance
 
 export function AdminDashboardPage() {
   const [session, setSession] = useState<AdminSession | null>(() => readStoredSession())
@@ -738,20 +729,24 @@ function CameraQrScanner({
   onDetect: (value: string) => void
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const frameRef = useRef<number | null>(null)
+  const scanTimerRef = useRef<number | null>(null)
   const [isOpen, setIsOpen] = useState(false)
   const [status, setStatus] = useState('')
-  const isSupported = Boolean(getBarcodeDetector() && navigator.mediaDevices?.getUserMedia)
+  const isSupported = Boolean(navigator.mediaDevices?.getUserMedia)
 
   const stopScanner = useCallback(() => {
-    if (frameRef.current !== null) {
-      window.cancelAnimationFrame(frameRef.current)
-      frameRef.current = null
+    if (scanTimerRef.current !== null) {
+      window.clearTimeout(scanTimerRef.current)
+      scanTimerRef.current = null
     }
 
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
     setIsOpen(false)
   }, [])
 
@@ -763,16 +758,14 @@ function CameraQrScanner({
     let isCancelled = false
 
     const startScanner = async () => {
-      const BarcodeDetector = getBarcodeDetector()
-
-      if (!BarcodeDetector) {
-        setStatus('Camera QR scanning is not supported in this browser.')
-        return
-      }
-
       try {
+        setStatus('Starting camera...')
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
         })
 
         if (isCancelled) {
@@ -787,17 +780,41 @@ function CameraQrScanner({
           await videoRef.current.play()
         }
 
-        const detector = new BarcodeDetector({ formats: ['qr_code'] })
         setStatus('Point the camera at the ticket QR code.')
 
-        const scanFrame = async () => {
-          if (!videoRef.current) {
+        const scheduleNextScan = () => {
+          scanTimerRef.current = window.setTimeout(scanFrame, 120)
+        }
+
+        const scanFrame = () => {
+          if (isCancelled) {
+            return
+          }
+
+          const video = videoRef.current
+          const canvas = canvasRef.current
+          const width = video?.videoWidth ?? 0
+          const height = video?.videoHeight ?? 0
+
+          if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || width === 0 || height === 0) {
+            scheduleNextScan()
             return
           }
 
           try {
-            const codes = await detector.detect(videoRef.current)
-            const value = codes.find((code) => code.rawValue)?.rawValue?.trim()
+            canvas.width = width
+            canvas.height = height
+            const context = canvas.getContext('2d', { willReadFrequently: true })
+
+            if (!context) {
+              scheduleNextScan()
+              return
+            }
+
+            context.drawImage(video, 0, 0, width, height)
+            const imageData = context.getImageData(0, 0, width, height)
+            const code = jsQR(imageData.data, width, height, { inversionAttempts: 'attemptBoth' })
+            const value = code?.data.trim()
 
             if (value) {
               onDetect(value)
@@ -808,14 +825,10 @@ function CameraQrScanner({
             setStatus('Still scanning. Hold the QR code steady in the frame.')
           }
 
-          frameRef.current = window.requestAnimationFrame(() => {
-            void scanFrame()
-          })
+          scheduleNextScan()
         }
 
-        frameRef.current = window.requestAnimationFrame(() => {
-          void scanFrame()
-        })
+        scanFrame()
       } catch {
         if (!isCancelled) {
           setStatus('Camera permission is needed. You can paste the scanned token instead.')
@@ -847,16 +860,13 @@ function CameraQrScanner({
       </Button>
       {isOpen && (
         <div className="grid gap-2">
-          <video className="aspect-video w-full border border-black bg-black object-cover" muted playsInline ref={videoRef} />
+          <video autoPlay className="aspect-video w-full border border-black bg-black object-cover" muted playsInline ref={videoRef} />
+          <canvas className="hidden" ref={canvasRef} />
           {status && <p className="text-xs font-semibold uppercase text-black/55">{status}</p>}
         </div>
       )}
     </div>
   )
-}
-
-function getBarcodeDetector() {
-  return (window as Window & { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector
 }
 
 function AdminField({
