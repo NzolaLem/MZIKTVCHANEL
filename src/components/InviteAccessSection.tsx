@@ -1,5 +1,5 @@
 import { ArrowRight, CheckCircle2, Loader2, LockKeyhole, QrCode, UserRound } from 'lucide-react'
-import { useEffect, useState, type FormEvent, type HTMLInputTypeAttribute, type ReactNode } from 'react'
+import { useState, type FormEvent, type HTMLInputTypeAttribute, type ReactNode } from 'react'
 import type { GuestGender, Order } from '../types'
 import { verifyGuestInvite } from '../data/invites'
 import { inviteSectionId } from '../lib/inviteNavigation'
@@ -20,36 +20,17 @@ const initialForm = {
 
 type FormErrors = Partial<Record<keyof typeof initialForm | 'form', string>>
 type InviteFormState = typeof initialForm
-type StoredInviteAccess = {
-  form: InviteFormState
-  order: Order
-}
-
-const inviteAccessStorageKey = 'mzik-invite-access-v1'
 
 export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order) => void }) {
-  const [storedInviteAccess] = useState(() => readStoredInviteAccess())
-  const [form, setForm] = useState<InviteFormState>(storedInviteAccess?.form ?? initialForm)
+  const [form, setForm] = useState<InviteFormState>(initialForm)
   const [errors, setErrors] = useState<FormErrors>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [ticketOrder, setTicketOrder] = useState<Order | null>(storedInviteAccess?.order ?? null)
-
-  useEffect(() => {
-    if (!ticketOrder) {
-      return
-    }
-
-    writeStoredInviteAccess({
-      form,
-      order: ticketOrder,
-    })
-  }, [form, ticketOrder])
+  const [ticketOrder, setTicketOrder] = useState<Order | null>(null)
 
   const updateField = (field: keyof typeof initialForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }))
     setErrors((current) => ({ ...current, [field]: undefined, form: undefined }))
     setTicketOrder(null)
-    clearStoredInviteAccess()
   }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -102,10 +83,6 @@ export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order
     setForm(nextForm)
     setErrors({})
     setTicketOrder(result.order)
-    writeStoredInviteAccess({
-      form: nextForm,
-      order: result.order,
-    })
   }
 
   return (
@@ -304,33 +281,4 @@ function LockedTicketPreview() {
       </div>
     </article>
   )
-}
-
-function readStoredInviteAccess() {
-  try {
-    const storedValue = window.sessionStorage.getItem(inviteAccessStorageKey)
-
-    if (!storedValue) {
-      return null
-    }
-
-    const storedInviteAccess = JSON.parse(storedValue) as StoredInviteAccess
-
-    if (!storedInviteAccess?.order?.id || !storedInviteAccess.form?.fullName) {
-      clearStoredInviteAccess()
-      return null
-    }
-
-    return storedInviteAccess
-  } catch {
-    return null
-  }
-}
-
-function writeStoredInviteAccess(inviteAccess: StoredInviteAccess) {
-  window.sessionStorage.setItem(inviteAccessStorageKey, JSON.stringify(inviteAccess))
-}
-
-function clearStoredInviteAccess() {
-  window.sessionStorage.removeItem(inviteAccessStorageKey)
 }

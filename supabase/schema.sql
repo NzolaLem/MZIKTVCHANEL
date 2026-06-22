@@ -62,6 +62,70 @@ begin
   end if;
 end $$;
 
+create or replace function check_in_ticket_atomic(
+  p_ticket_id text,
+  p_token_hash text,
+  p_checkin_id text,
+  p_checked_in_at timestamptz
+)
+returns table (
+  ticket_id text,
+  guest_id text,
+  event_id text,
+  checked_in_at timestamptz,
+  already_checked_in boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ticket tickets%rowtype;
+  v_guest guests%rowtype;
+begin
+  select *
+    into v_ticket
+    from tickets
+    where id = p_ticket_id
+      and token_hash = p_token_hash
+    for update;
+
+  if not found then
+    return;
+  end if;
+
+  select *
+    into v_guest
+    from guests
+    where id = v_ticket.guest_id
+    for update;
+
+  if not found then
+    return;
+  end if;
+
+  if v_ticket.checked_in_at is not null or v_guest.checked_in_at is not null then
+    return query
+      select v_ticket.id, v_ticket.guest_id, v_ticket.event_id, coalesce(v_ticket.checked_in_at, v_guest.checked_in_at), true;
+    return;
+  end if;
+
+  update tickets
+    set checked_in_at = p_checked_in_at
+    where id = v_ticket.id;
+
+  update guests
+    set checked_in_at = p_checked_in_at
+    where id = v_ticket.guest_id;
+
+  insert into checkins (id, ticket_id, guest_id, event_id, checked_in_at)
+    values (p_checkin_id, v_ticket.id, v_ticket.guest_id, v_ticket.event_id, p_checked_in_at);
+
+  return query
+    select v_ticket.id, v_ticket.guest_id, v_ticket.event_id, p_checked_in_at, false;
+end;
+$$;
+
 -- Lock the tables down to the service role only.
 alter table guests enable row level security;
 alter table tickets enable row level security;

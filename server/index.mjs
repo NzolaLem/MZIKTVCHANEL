@@ -16,7 +16,11 @@ const tokenIssuer = 'mzik-ticket-api'
 const validGenders = new Set(['female', 'male'])
 const defaultAccessCode = 'GUEST-LIST'
 const maxBulkGuests = 500
+const adminLoginLimit = { maxAttempts: 8, windowMs: 10 * 60 * 1000 }
+const inviteUnlockLimit = { maxAttempts: 10, windowMs: 10 * 60 * 1000 }
 const isProduction = process.env.NODE_ENV === 'production'
+const adminLoginAttempts = new Map()
+const inviteUnlockAttempts = new Map()
 
 const supabaseProjectId = cleanEnv(process.env.SUPABASE_PROJECT_ID)
 const supabaseUrl = cleanEnv(process.env.SUPABASE_URL) || (supabaseProjectId ? `https://${supabaseProjectId}.supabase.co` : '')
@@ -105,14 +109,14 @@ const seedGuests = [
   },
 ]
 
-if (hasSupabaseConfig()) {
+if (hasSupabaseConfig() && !isProduction) {
   try {
     await ensureSeedGuests()
   } catch (error) {
     console.error('Could not seed demo guests at startup:', error)
   }
 } else {
-  console.warn('Supabase seed skipped: database configuration is incomplete.')
+  console.warn(isProduction ? 'Supabase seed skipped in production.' : 'Supabase seed skipped: database configuration is incomplete.')
 }
 
 export async function handleRequest(request, response) {
@@ -236,6 +240,15 @@ async function verifyInviteRequest(request, response) {
     return
   }
 
+  const ipKey = createRateLimitKey('invite-ip', getRequestIp(request))
+  const guestKey = createRateLimitKey('invite-guest', getRequestIp(request), normalizedName, gender)
+  if (writeRateLimitResponseIfNeeded(response, inviteUnlockAttempts, ipKey, inviteUnlockLimit, 'Too many unlock attempts. Try again later.')) {
+    return
+  }
+  if (writeRateLimitResponseIfNeeded(response, inviteUnlockAttempts, guestKey, inviteUnlockLimit, 'Too many unlock attempts for this guest. Try again later.')) {
+    return
+  }
+
   const candidates = await findGuestCandidates({ normalizedName, gender })
   let guest = null
 
@@ -247,9 +260,14 @@ async function verifyInviteRequest(request, response) {
   }
 
   if (!guest) {
+    recordRateLimitFailure(inviteUnlockAttempts, ipKey, inviteUnlockLimit.windowMs)
+    recordRateLimitFailure(inviteUnlockAttempts, guestKey, inviteUnlockLimit.windowMs)
     writeJson(response, 401, { error: 'These invite details do not match the guest list.' })
     return
   }
+
+  clearRateLimit(inviteUnlockAttempts, ipKey)
+  clearRateLimit(inviteUnlockAttempts, guestKey)
 
   if (guest.checkedInAt) {
     writeJson(response, 409, { error: 'This guest is already checked in.' })
@@ -263,12 +281,19 @@ async function verifyInviteRequest(request, response) {
 async function loginAdminRequest(request, response) {
   const body = await readJsonBody(request)
   const password = String(body.password ?? '')
+  const ipKey = createRateLimitKey('admin-login', getRequestIp(request))
+
+  if (writeRateLimitResponseIfNeeded(response, adminLoginAttempts, ipKey, adminLoginLimit, 'Too many admin login attempts. Try again later.')) {
+    return
+  }
 
   if (!timingSafeStringEqual(password, adminPassword)) {
+    recordRateLimitFailure(adminLoginAttempts, ipKey, adminLoginLimit.windowMs)
     writeJson(response, 401, { error: 'Invalid admin password.' })
     return
   }
 
+  clearRateLimit(adminLoginAttempts, ipKey)
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 8).toISOString()
   const token = signToken({ sub: 'admin', role: 'admin', exp: Math.floor(new Date(expiresAt).getTime() / 1000) })
   writeJson(response, 200, { token, expiresAt })
@@ -374,14 +399,10 @@ async function createGuestEntries(inputs, { skipExisting, generateMissingPasswor
     return { created: [], skipped }
   }
 
-  const preparedNames = new Set(preparedGuests.map((guest) => guest.normalizedName))
-  const { data: existingRows, error: existingError } = await supabase.from('guests').select('full_name, normalized_name')
-
-  if (existingError) {
-    throw databaseError(existingError)
-  }
-
-  const existingNames = new Set((existingRows ?? []).filter((row) => preparedNames.has(row.normalized_name)).map((row) => row.normalized_name))
+  const existingNames = await findExistingGuestNames(
+    supabase,
+    preparedGuests.map((guest) => guest.normalizedName),
+  )
   const guestsToCreate = []
 
   for (const guest of preparedGuests) {
@@ -480,6 +501,48 @@ async function checkInTicketRequest(request, response) {
     return
   }
 
+  const checkedInAt = new Date().toISOString()
+  const { data: checkinRows, error: checkinError } = await supabase.rpc('check_in_ticket_atomic', {
+    p_ticket_id: payload.ticketId,
+    p_token_hash: hashTicketToken(ticketToken),
+    p_checkin_id: `checkin-${randomUUID()}`,
+    p_checked_in_at: checkedInAt,
+  })
+
+  if (checkinError) {
+    if (isMissingRpcError(checkinError)) {
+      await checkInTicketRequestLegacy(response, supabase, ticketToken, payload)
+      return
+    }
+
+    throw databaseError(checkinError)
+  }
+
+  const checkin = Array.isArray(checkinRows) ? checkinRows[0] : checkinRows
+  const guest = checkin ? await findGuestById(checkin.guest_id) : null
+
+  if (!checkin || !guest) {
+    writeJson(response, 404, { error: 'Ticket was not found.' })
+    return
+  }
+
+  if (checkin.already_checked_in) {
+    writeJson(response, 409, {
+      error: 'Guest is already checked in.',
+      guest: sanitizeGuest(guest),
+      checkedInAt: checkin.checked_in_at ?? guest.checkedInAt,
+    })
+    return
+  }
+
+  writeJson(response, 200, {
+    ok: true,
+    guest: sanitizeGuest({ ...guest, checkedInAt: checkin.checked_in_at }),
+    checkedInAt: checkin.checked_in_at,
+  })
+}
+
+async function checkInTicketRequestLegacy(response, supabase, ticketToken, payload) {
   const { data: ticket, error: ticketError } = await supabase
     .from('tickets')
     .select('*')
@@ -508,7 +571,6 @@ async function checkInTicketRequest(request, response) {
   }
 
   const checkedInAt = new Date().toISOString()
-
   const { data: updatedTicket, error: ticketUpdateError } = await supabase
     .from('tickets')
     .update({ checked_in_at: checkedInAt })
@@ -516,6 +578,7 @@ async function checkInTicketRequest(request, response) {
     .is('checked_in_at', null)
     .select('id')
     .maybeSingle()
+
   if (ticketUpdateError) {
     throw databaseError(ticketUpdateError)
   }
@@ -618,6 +681,27 @@ async function findGuestCandidates({ normalizedName, gender }) {
   }
 
   return (data ?? []).map(rowToGuest)
+}
+
+async function findExistingGuestNames(supabase, normalizedNames) {
+  const existingNames = new Set()
+  const uniqueNames = [...new Set(normalizedNames)].filter(Boolean)
+  const chunkSize = 100
+
+  for (let index = 0; index < uniqueNames.length; index += chunkSize) {
+    const chunk = uniqueNames.slice(index, index + chunkSize)
+    const { data, error } = await supabase.from('guests').select('normalized_name').in('normalized_name', chunk)
+
+    if (error) {
+      throw databaseError(error)
+    }
+
+    for (const row of data ?? []) {
+      existingNames.add(row.normalized_name)
+    }
+  }
+
+  return existingNames
 }
 
 async function findGuestById(guestId) {
@@ -1015,6 +1099,63 @@ function requestError(statusCode, publicMessage) {
   return error
 }
 
+function writeRateLimitResponseIfNeeded(response, attempts, key, limit, message) {
+  const entry = getActiveRateLimitEntry(attempts, key)
+
+  if (!entry || entry.count < limit.maxAttempts) {
+    return false
+  }
+
+  writeJson(response, 429, {
+    error: message,
+    retryAfterSeconds: Math.max(1, Math.ceil((entry.resetAt - Date.now()) / 1000)),
+  })
+  return true
+}
+
+function recordRateLimitFailure(attempts, key, windowMs) {
+  const now = Date.now()
+  const entry = getActiveRateLimitEntry(attempts, key)
+
+  if (!entry) {
+    attempts.set(key, { count: 1, resetAt: now + windowMs })
+    return
+  }
+
+  entry.count += 1
+}
+
+function clearRateLimit(attempts, key) {
+  attempts.delete(key)
+}
+
+function getActiveRateLimitEntry(attempts, key) {
+  const entry = attempts.get(key)
+
+  if (!entry) {
+    return null
+  }
+
+  if (Date.now() >= entry.resetAt) {
+    attempts.delete(key)
+    return null
+  }
+
+  return entry
+}
+
+function createRateLimitKey(...parts) {
+  return parts.map((part) => String(part ?? '').trim().toLocaleLowerCase()).join(':')
+}
+
+function getRequestIp(request) {
+  const forwardedFor = String(request.headers['x-forwarded-for'] ?? '')
+    .split(',')[0]
+    .trim()
+
+  return forwardedFor || String(request.headers['x-real-ip'] ?? request.socket?.remoteAddress ?? 'unknown')
+}
+
 function databaseError(error) {
   console.error('Supabase error:', error)
   const wrapped = new Error(error?.message ?? 'Database error')
@@ -1024,6 +1165,10 @@ function databaseError(error) {
       ? 'The Supabase database tables are not set up yet. Run supabase/schema.sql in the Supabase SQL Editor.'
       : 'A database error occurred.'
   return wrapped
+}
+
+function isMissingRpcError(error) {
+  return ['PGRST202', 'PGRST204'].includes(error?.code) || String(error?.message ?? '').includes('check_in_ticket_atomic')
 }
 
 function cleanEnv(value) {

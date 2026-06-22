@@ -66,4 +66,4 @@ npm run dev:api
 
 ## Database
 
-The production database is Supabase Postgres. Run [`supabase/schema.sql`](supabase/schema.sql) once in the Supabase SQL editor to create the required `guests`, `tickets`, and `checkins` tables.
+The production database is Supabase Postgres. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL editor to create or update the required `guests`, `tickets`, `checkins`, and atomic check-in function.

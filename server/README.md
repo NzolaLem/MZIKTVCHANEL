@@ -6,7 +6,7 @@ This backend runs the invite-only guest list flow for Triunfo HouseParty.
 
 1. In the Supabase dashboard open **SQL Editor → New query**, paste the contents of
    [`supabase/schema.sql`](../supabase/schema.sql), and **Run** it. This creates the
-   `guests`, `tickets`, and `checkins` tables.
+   `guests`, `tickets`, and `checkins` tables plus the atomic check-in function.
 2. Copy `.env.example` to `.env` and fill in the values (see below).
 
 ## Run locally
@@ -44,7 +44,8 @@ On Vercel, set these same variables in **Project Settings → Environment Variab
 
 Guests, tickets, and check-ins are stored in Supabase (Postgres). Guest passwords are hashed
 with `scrypt`; raw guest passwords are only returned once when an admin creates a guest. The
-three demo "seed" guests are upserted on startup so the table is never empty.
+three demo "seed" guests are only upserted outside production so public demo credentials cannot
+unlock real production tickets.
 
 Row Level Security is enabled on all tables with no policies, so the public/anon key cannot
 read guest data — only the server's service-role key (which bypasses RLS) can.
@@ -68,7 +69,8 @@ Checks `fullName`, `gender`, and `password` against the guest list. On success i
 
 `POST /api/admin/login`
 
-Creates an 8-hour admin bearer token from the admin password.
+Creates an 8-hour admin bearer token from the admin password. The frontend keeps this token in
+memory only, so refreshing the admin dashboard requires logging in again.
 
 `GET /api/admin/guests`
 
@@ -92,4 +94,6 @@ Lists check-in records. Requires admin auth.
 
 `POST /api/checkins`
 
-Checks in a ticket from its QR token. Requires admin auth and rejects duplicate check-ins.
+Checks in a ticket from its QR token. Requires admin auth and rejects duplicate check-ins. When
+`check_in_ticket_atomic` exists in Supabase, ticket, guest, and check-in rows are updated in one
+database transaction.

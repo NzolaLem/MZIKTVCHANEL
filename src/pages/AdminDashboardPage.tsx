@@ -26,8 +26,6 @@ import {
 import { formatEventDate } from '../lib/dates'
 import { cn } from '../lib/cn'
 
-const adminSessionStorageKey = 'mzik-admin-session-v1'
-
 const genderOptions: Array<{ label: string; value: GuestGender }> = [
   { label: 'Female', value: 'female' },
   { label: 'Male', value: 'male' },
@@ -52,7 +50,7 @@ type CheckinMessage = {
 }
 
 export function AdminDashboardPage() {
-  const [session, setSession] = useState<AdminSession | null>(() => readStoredSession())
+  const [session, setSession] = useState<AdminSession | null>(null)
   const [loginPassword, setLoginPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [isLoggingIn, setIsLoggingIn] = useState(false)
@@ -129,7 +127,6 @@ export function AdminDashboardPage() {
     try {
       const nextSession = await loginAdmin(loginPassword)
       setSession(nextSession)
-      window.sessionStorage.setItem(adminSessionStorageKey, JSON.stringify(nextSession))
       setLoginPassword('')
     } catch (error) {
       setLoginError(getErrorMessage(error))
@@ -139,7 +136,6 @@ export function AdminDashboardPage() {
   }
 
   const logout = useCallback(() => {
-    window.sessionStorage.removeItem(adminSessionStorageKey)
     setSession(null)
     setGuests([])
   }, [])
@@ -815,8 +811,8 @@ function CameraQrScanner({
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 640 },
+            height: { ideal: 480 },
           },
         })
 
@@ -835,7 +831,7 @@ function CameraQrScanner({
         setStatus('Point the camera at the ticket QR code.')
 
         const scheduleNextScan = () => {
-          scanTimerRef.current = window.setTimeout(scanFrame, 120)
+          scanTimerRef.current = window.setTimeout(scanFrame, 180)
         }
 
         const scanFrame = () => {
@@ -854,8 +850,11 @@ function CameraQrScanner({
           }
 
           try {
-            canvas.width = width
-            canvas.height = height
+            const cropSize = Math.floor(Math.min(width, height) * 0.78)
+            const cropX = Math.floor((width - cropSize) / 2)
+            const cropY = Math.floor((height - cropSize) / 2)
+            canvas.width = cropSize
+            canvas.height = cropSize
             const context = canvas.getContext('2d', { willReadFrequently: true })
 
             if (!context) {
@@ -863,9 +862,9 @@ function CameraQrScanner({
               return
             }
 
-            context.drawImage(video, 0, 0, width, height)
-            const imageData = context.getImageData(0, 0, width, height)
-            const code = jsQR(imageData.data, width, height, { inversionAttempts: 'attemptBoth' })
+            context.drawImage(video, cropX, cropY, cropSize, cropSize, 0, 0, cropSize, cropSize)
+            const imageData = context.getImageData(0, 0, cropSize, cropSize)
+            const code = jsQR(imageData.data, cropSize, cropSize, { inversionAttempts: 'attemptBoth' })
             const value = code?.data.trim()
 
             if (value) {
@@ -1105,27 +1104,6 @@ function formatCredentialCsv(credentials: BulkGuestCredential[]) {
 
 function escapeCsvCell(value: string) {
   return `"${value.replace(/"/g, '""')}"`
-}
-
-function readStoredSession() {
-  try {
-    const rawSession = window.sessionStorage.getItem(adminSessionStorageKey)
-
-    if (!rawSession) {
-      return null
-    }
-
-    const session = JSON.parse(rawSession) as AdminSession
-
-    if (!session.token || !session.expiresAt || Date.now() >= new Date(session.expiresAt).getTime()) {
-      window.sessionStorage.removeItem(adminSessionStorageKey)
-      return null
-    }
-
-    return session
-  } catch {
-    return null
-  }
 }
 
 function getErrorMessage(error: unknown) {
