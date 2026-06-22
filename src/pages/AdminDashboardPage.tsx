@@ -1,4 +1,4 @@
-import { CheckCircle2, KeyRound, Loader2, LockKeyhole, Plus, QrCode, RefreshCw, ScanLine, ShieldCheck, Trash2, UsersRound } from 'lucide-react'
+import { CheckCircle2, KeyRound, Loader2, LockKeyhole, Plus, QrCode, RefreshCw, ScanLine, Search, ShieldCheck, Trash2, UsersRound } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type HTMLInputTypeAttribute } from 'react'
 import jsQR from 'jsqr'
 import { Button } from '../components/Button'
@@ -73,6 +73,8 @@ export function AdminDashboardPage() {
   const [bulkCredentials, setBulkCredentials] = useState<BulkGuestCredential[]>([])
   const [bulkSkipped, setBulkSkipped] = useState<SkippedGuestImport[]>([])
   const [bulkError, setBulkError] = useState('')
+  const [isGuestListVisible, setIsGuestListVisible] = useState(false)
+  const [guestSearch, setGuestSearch] = useState('')
   const [form, setForm] = useState<AdminGuestForm>(() => ({
     fullName: '',
     gender: 'male',
@@ -96,6 +98,17 @@ export function AdminDashboardPage() {
     ],
     [adminGuests.length, guests.length, seededGuests.length],
   )
+  const filteredGuests = useMemo(() => {
+    const query = normalizeGuestName(guestSearch)
+
+    if (!query) {
+      return guests
+    }
+
+    return guests.filter((guest) => {
+      return normalizeGuestName(guest.fullName).includes(query) || normalizeGuestName(guest.inviteLabel).includes(query)
+    })
+  }, [guestSearch, guests])
 
   const updateField = <Field extends keyof AdminGuestForm>(field: Field, value: AdminGuestForm[Field]) => {
     setForm((current) => ({ ...current, [field]: value }))
@@ -684,35 +697,74 @@ export function AdminDashboardPage() {
             </div>
 
             <div className="border border-black bg-white">
-              <div className="flex items-center justify-between gap-4 border-b border-black p-4">
+              <div className="flex flex-col gap-3 border-b border-black p-4 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="flex items-center gap-2 text-sm font-semibold uppercase">
                   <UsersRound size={18} />
-                  Guest list
+                  Guest list / {guests.length}
                 </h2>
+                <Button className="w-full sm:w-auto" onClick={() => setIsGuestListVisible((current) => !current)} variant={isGuestListVisible ? 'outline' : 'dark'}>
+                  <UsersRound size={16} />
+                  {isGuestListVisible ? 'Hide guest list' : `View guest list (${guests.length})`}
+                </Button>
               </div>
-              <div className="grid">
-                {guests.map((guest) => (
-                  <article className="grid gap-4 border-b border-black p-4 last:border-b-0 xl:grid-cols-[1fr_0.4fr_auto] xl:items-center" key={guest.id}>
-                    <div>
-                      <p className="text-lg font-semibold uppercase">{guest.fullName}</p>
-                      <p className="mt-1 text-xs font-semibold uppercase text-black/50">
-                        {formatGender(guest.gender)} / {guest.inviteLabel}
-                      </p>
-                    </div>
-                    <div className="grid gap-2 text-sm">
-                      <AccessPill label="Password" value={guest.passwordStatus} />
-                    </div>
-                    {guest.source === 'admin' ? (
-                      <Button onClick={() => void removeGuest(guest.id)} variant="outline">
-                        <Trash2 size={16} />
-                        Delete
-                      </Button>
+
+              {isGuestListVisible ? (
+                <>
+                  <div className="grid gap-3 border-b border-black p-4">
+                    <label className="grid gap-2" htmlFor="guest-list-search">
+                      <span className="flex items-center gap-2 text-xs font-semibold uppercase text-black/65">
+                        <Search size={14} />
+                        Search guest list
+                      </span>
+                      <input
+                        className="h-12 border border-black bg-white px-4 text-base outline-none transition placeholder:text-black/35 focus:bg-mzik-lavender/40"
+                        id="guest-list-search"
+                        onChange={(event) => setGuestSearch(event.target.value)}
+                        placeholder="Search by name or tier"
+                        value={guestSearch}
+                      />
+                    </label>
+                    <p className="text-xs font-semibold uppercase text-black/50">
+                      Showing {filteredGuests.length} of {guests.length} guests
+                    </p>
+                  </div>
+
+                  <div className="grid max-h-[72vh] overflow-y-auto">
+                    {filteredGuests.length > 0 ? (
+                      filteredGuests.map((guest) => (
+                        <article
+                          className="grid gap-3 border-b border-black p-4 last:border-b-0 xl:grid-cols-[1fr_0.4fr_auto] xl:items-center"
+                          key={guest.id}
+                        >
+                          <div className="min-w-0">
+                            <p className="break-words text-base font-semibold uppercase md:text-lg">{guest.fullName}</p>
+                            <p className="mt-1 text-xs font-semibold uppercase text-black/50">
+                              {formatGender(guest.gender)} / {guest.inviteLabel}
+                            </p>
+                          </div>
+                          <div className="grid gap-2 text-sm">
+                            <AccessPill label="Password" value={guest.passwordStatus} />
+                          </div>
+                          {guest.source === 'admin' ? (
+                            <Button className="w-full xl:w-auto" onClick={() => void removeGuest(guest.id)} variant="outline">
+                              <Trash2 size={16} />
+                              Delete
+                            </Button>
+                          ) : (
+                            <p className="border border-black px-4 py-3 text-center text-xs font-semibold uppercase text-black/55">Seed</p>
+                          )}
+                        </article>
+                      ))
                     ) : (
-                      <p className="border border-black px-4 py-3 text-center text-xs font-semibold uppercase text-black/55">Seed</p>
+                      <p className="p-4 text-sm font-semibold uppercase text-black/50">No guests match this search.</p>
                     )}
-                  </article>
-                ))}
-              </div>
+                  </div>
+                </>
+              ) : (
+                <p className="p-4 text-sm font-semibold uppercase leading-6 text-black/50">
+                  Guest list hidden for a cleaner mobile dashboard. Tap view guest list when you need names.
+                </p>
+              )}
             </div>
           </section>
         </div>
