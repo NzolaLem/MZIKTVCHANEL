@@ -135,7 +135,9 @@ export async function handleRequest(request, response) {
 
     await serveStaticFile(response, url)
   } catch (error) {
-    if (error.isConfigurationError) {
+    if ((error.statusCode ?? 500) < 500) {
+      // Expected client/auth errors are returned to the caller without noisy stack traces.
+    } else if (error.isConfigurationError) {
       console.error(error.publicMessage)
     } else {
       console.error(error)
@@ -197,6 +199,13 @@ async function routeApiRequest(request, response, url) {
   if (request.method === 'POST' && url.pathname === '/api/admin/guests/bulk') {
     await requireAdmin(request)
     await createBulkGuestsRequest(request, response)
+    return
+  }
+
+  const guestPasswordResetMatch = url.pathname.match(/^\/api\/admin\/guests\/([^/]+)\/password$/)
+  if (request.method === 'POST' && guestPasswordResetMatch) {
+    await requireAdmin(request)
+    await resetGuestPasswordRequest(response, guestPasswordResetMatch[1])
     return
   }
 
@@ -343,6 +352,7 @@ async function createBulkGuestsRequest(request, response) {
   writeJson(response, 201, {
     guests: result.created.map((entry) => sanitizeGuest(entry.guest)),
     credentials: result.created.map((entry) => ({
+      guestId: entry.guest.id,
       fullName: entry.guest.fullName,
       gender: entry.guest.gender,
       ticketTypeId: entry.guest.ticketTypeId,
@@ -460,6 +470,31 @@ async function createGuestEntries(inputs, { skipExisting, generateMissingPasswor
     })),
     skipped,
   }
+}
+
+async function resetGuestPasswordRequest(response, guestId) {
+  const supabase = getSupabase()
+  const password = generateGuestPassword()
+  const { data, error } = await supabase
+    .from('guests')
+    .update({ password_hash: await hashPassword(password) })
+    .eq('id', guestId)
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    throw databaseError(error)
+  }
+
+  if (!data) {
+    writeJson(response, 404, { error: 'Guest not found.' })
+    return
+  }
+
+  writeJson(response, 200, {
+    guest: sanitizeGuest(rowToGuest(data)),
+    temporaryPassword: password,
+  })
 }
 
 async function deleteGuestRequest(response, guestId) {

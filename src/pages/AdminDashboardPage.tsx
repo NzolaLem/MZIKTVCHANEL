@@ -14,6 +14,7 @@ import {
   getGuestList,
   loginAdmin,
   normalizeGuestName,
+  resetAdminGuestPassword,
   saveAdminGuest,
   saveAdminGuests,
   type AdminSession,
@@ -73,6 +74,9 @@ export function AdminDashboardPage() {
   const [bulkError, setBulkError] = useState('')
   const [isGuestListVisible, setIsGuestListVisible] = useState(false)
   const [guestSearch, setGuestSearch] = useState('')
+  const [visibleGuestPasswords, setVisibleGuestPasswords] = useState<Record<string, string>>({})
+  const [resettingGuestId, setResettingGuestId] = useState('')
+  const [guestListMessage, setGuestListMessage] = useState<CheckinMessage | null>(null)
   const [form, setForm] = useState<AdminGuestForm>(() => ({
     fullName: '',
     gender: 'male',
@@ -138,6 +142,7 @@ export function AdminDashboardPage() {
   const logout = useCallback(() => {
     setSession(null)
     setGuests([])
+    setVisibleGuestPasswords({})
   }, [])
 
   const refreshGuests = useCallback(async (token = session?.token) => {
@@ -275,6 +280,10 @@ export function AdminDashboardPage() {
         password: generateGuestPassword(),
       }))
       setLastTemporaryPassword(result.temporaryPassword)
+      setVisibleGuestPasswords((current) => ({
+        ...current,
+        [result.guest.id]: result.temporaryPassword,
+      }))
       setErrors({})
       setGuests(await getGuestList(session.token))
     } catch (error) {
@@ -308,6 +317,10 @@ export function AdminDashboardPage() {
       setBulkText('')
       setBulkCredentials(result.credentials)
       setBulkSkipped(result.skipped)
+      setVisibleGuestPasswords((current) => ({
+        ...current,
+        ...Object.fromEntries(result.credentials.map((credential) => [credential.guestId, credential.temporaryPassword])),
+      }))
       setGuests(await getGuestList(session.token))
 
       if (result.credentials.length === 0 && result.skipped.length > 0) {
@@ -344,9 +357,37 @@ export function AdminDashboardPage() {
     try {
       await deleteAdminGuest(guestId, session.token)
       setGuests(await getGuestList(session.token))
+      setVisibleGuestPasswords((current) => {
+        const nextPasswords = { ...current }
+        delete nextPasswords[guestId]
+        return nextPasswords
+      })
       setErrors({})
     } catch (error) {
       setErrors({ form: getErrorMessage(error) })
+    }
+  }
+
+  const resetGuestPassword = async (guestId: string) => {
+    if (!session?.token) {
+      return
+    }
+
+    setResettingGuestId(guestId)
+    setGuestListMessage(null)
+
+    try {
+      const result = await resetAdminGuestPassword(guestId, session.token)
+      setVisibleGuestPasswords((current) => ({
+        ...current,
+        [result.guest.id]: result.temporaryPassword,
+      }))
+      setGuests((current) => current.map((guest) => (guest.id === result.guest.id ? result.guest : guest)))
+      setGuestListMessage({ tone: 'success', text: `New password for ${result.guest.fullName}: ${result.temporaryPassword}` })
+    } catch (error) {
+      setGuestListMessage({ tone: 'error', text: getErrorMessage(error) })
+    } finally {
+      setResettingGuestId('')
     }
   }
 
@@ -725,6 +766,17 @@ export function AdminDashboardPage() {
                     </p>
                   </div>
 
+                  {guestListMessage && (
+                    <p
+                      className={cn(
+                        'border px-4 py-3 text-sm font-semibold',
+                        guestListMessage.tone === 'success' ? 'border-black bg-mzik-lavender/40 text-black' : 'border-mzik-red bg-mzik-red text-white',
+                      )}
+                    >
+                      {guestListMessage.text}
+                    </p>
+                  )}
+
                   <div className="grid max-h-[72vh] overflow-y-auto">
                     {filteredGuests.length > 0 ? (
                       filteredGuests.map((guest) => (
@@ -739,16 +791,27 @@ export function AdminDashboardPage() {
                             </p>
                           </div>
                           <div className="grid gap-2 text-sm">
-                            <AccessPill label="Password" value={guest.passwordStatus} />
+                            <AccessPill label="Password" value={visibleGuestPasswords[guest.id] ?? 'Hidden - reset to view'} />
                           </div>
-                          {guest.source === 'admin' ? (
-                            <Button className="w-full xl:w-auto" onClick={() => void removeGuest(guest.id)} variant="outline">
-                              <Trash2 size={16} />
-                              Delete
+                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                            <Button
+                              className="w-full xl:w-auto"
+                              disabled={resettingGuestId === guest.id}
+                              onClick={() => void resetGuestPassword(guest.id)}
+                              variant="outline"
+                            >
+                              {resettingGuestId === guest.id ? <Loader2 className="animate-spin" size={16} /> : <KeyRound size={16} />}
+                              Reset password
                             </Button>
-                          ) : (
-                            <p className="border border-black px-4 py-3 text-center text-xs font-semibold uppercase text-black/55">Seed</p>
-                          )}
+                            {guest.source === 'admin' ? (
+                              <Button className="w-full xl:w-auto" onClick={() => void removeGuest(guest.id)} variant="outline">
+                                <Trash2 size={16} />
+                                Delete
+                              </Button>
+                            ) : (
+                              <p className="border border-black px-4 py-3 text-center text-xs font-semibold uppercase text-black/55">Seed</p>
+                            )}
+                          </div>
                         </article>
                       ))
                     ) : (

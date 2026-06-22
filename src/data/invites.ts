@@ -48,6 +48,7 @@ export type BulkAdminGuestInput = {
 }
 
 export type BulkGuestCredential = {
+  guestId: string
   fullName: string
   gender: GuestGender
   ticketTypeId: string
@@ -179,6 +180,13 @@ export async function saveAdminGuests(guests: BulkAdminGuestInput[], token: stri
 export async function deleteAdminGuest(guestId: string, token: string) {
   await apiRequest<{ ok: true }>(`/api/admin/guests/${guestId}`, {
     method: 'DELETE',
+    token,
+  })
+}
+
+export async function resetAdminGuestPassword(guestId: string, token: string) {
+  return apiRequest<{ guest: RegisteredGuest; temporaryPassword: string }>(`/api/admin/guests/${guestId}/password`, {
+    method: 'POST',
     token,
   })
 }

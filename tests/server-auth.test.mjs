@@ -49,6 +49,13 @@ test('invite unlock validates required details before hitting storage', async ()
   assert.equal(response.body.error, 'Name, gender, and password are required.')
 })
 
+test('guest password reset requires admin authorization', async () => {
+  const response = await postJson('/api/admin/guests/guest-test/password', {})
+
+  assert.equal(response.status, 401)
+  assert.equal(response.body.error, 'Admin authorization is required.')
+})
+
 async function postJson(path, body, extraHeaders = {}) {
   const request = Readable.from([JSON.stringify(body)])
   request.method = 'POST'

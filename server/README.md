@@ -84,6 +84,10 @@ Creates one guest with name, gender, password, and ticket tier. Requires admin a
 
 Creates up to 500 guests from a pasted/imported list. Missing passwords are generated and returned once for admin handoff. Existing guest names are skipped.
 
+`POST /api/admin/guests/:id/password`
+
+Resets a guest password and returns the new temporary password once. Existing passwords cannot be revealed because only password hashes are stored.
+
 `DELETE /api/admin/guests/:id`
 
 Deletes an admin-created guest and their issued tickets/check-ins. Seed demo guests cannot be deleted.
