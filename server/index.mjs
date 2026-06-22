@@ -250,7 +250,7 @@ async function verifyInviteRequest(request, response) {
   }
 
   const ipKey = createRateLimitKey('invite-ip', getRequestIp(request))
-  const guestKey = createRateLimitKey('invite-guest', getRequestIp(request), normalizedName, gender)
+  const guestKey = createRateLimitKey('invite-guest', getRequestIp(request), normalizedName)
   if (writeRateLimitResponseIfNeeded(response, inviteUnlockAttempts, ipKey, inviteUnlockLimit, 'Too many unlock attempts. Try again later.')) {
     return
   }
@@ -258,7 +258,7 @@ async function verifyInviteRequest(request, response) {
     return
   }
 
-  const candidates = await findGuestCandidates({ normalizedName, gender })
+  const candidates = await findGuestCandidates({ normalizedName })
   let guest = null
 
   for (const candidate of candidates) {
@@ -284,7 +284,7 @@ async function verifyInviteRequest(request, response) {
   }
 
   const ticket = await issueOrReuseTicket(guest)
-  writeJson(response, 200, { order: createOrder(guest, ticket) })
+  writeJson(response, 200, { order: createOrder(guest, ticket, gender) })
 }
 
 async function loginAdminRequest(request, response) {
@@ -702,13 +702,12 @@ async function listCheckins() {
   }))
 }
 
-async function findGuestCandidates({ normalizedName, gender }) {
+async function findGuestCandidates({ normalizedName }) {
   const supabase = getSupabase()
   const { data, error } = await supabase
     .from('guests')
     .select('*')
     .eq('normalized_name', normalizedName)
-    .eq('gender', gender)
     .limit(5)
 
   if (error) {
@@ -822,7 +821,7 @@ function createTicketToken(ticket) {
   )
 }
 
-function createOrder(guest, ticket) {
+function createOrder(guest, ticket, fallbackGender = 'male') {
   const ticketType = event.ticketTypes.find((candidate) => candidate.id === guest.ticketTypeId) ?? event.ticketTypes[0]
 
   return {
@@ -840,7 +839,7 @@ function createOrder(guest, ticket) {
       phone: '',
     },
     guest: {
-      gender: guest.gender,
+      gender: getPublicGender(guest.gender, fallbackGender),
       inviteLabel: guest.inviteLabel,
     },
     subtotal: 0,
@@ -849,6 +848,14 @@ function createOrder(guest, ticket) {
     qrPayload: ticket.token,
     createdAt: ticket.issuedAt,
   }
+}
+
+function getPublicGender(gender, fallbackGender = 'male') {
+  if (validGenders.has(gender)) {
+    return gender
+  }
+
+  return validGenders.has(fallbackGender) ? fallbackGender : 'male'
 }
 
 async function ensureSeedGuests() {

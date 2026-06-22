@@ -65,7 +65,7 @@ Returns the Triunfo HouseParty event details.
 
 `POST /api/invites/verify`
 
-Checks `fullName`, `gender`, and `password` against the guest list. On success it returns an order with a signed QR payload.
+Checks `fullName` and `password` against the guest list. The submitted `gender` must still be female/male, but it is not used as a credential so imported guests are not blocked by a gender mismatch. On success it returns an order with a signed QR payload.
 
 `POST /api/admin/login`
 
