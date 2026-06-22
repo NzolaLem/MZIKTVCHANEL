@@ -73,6 +73,10 @@ export function TicketPreview({ order }: { order: Order }) {
         <div>
           <p className="text-xs font-semibold uppercase text-white/55">Digital ticket</p>
           <h2 className="mt-2 text-3xl font-semibold uppercase leading-none md:text-5xl">{order.event.title}</h2>
+          <Button className="mt-4 w-full md:hidden" onClick={downloadTicket} variant="light">
+            <Download size={16} />
+            Save ticket
+          </Button>
         </div>
         <img className="mt-5 h-14 w-14 invert md:mt-0" src="/mzik-assets/mzik-logo.png" alt="Mzik" />
       </div>
@@ -92,6 +96,12 @@ export function TicketPreview({ order }: { order: Order }) {
             {order.buyer.email && <p className="mt-1 text-sm text-black/60">{order.buyer.email}</p>}
             {order.guest && <p className="mt-1 text-sm text-black/60">{formatGender(order.guest.gender)}</p>}
           </div>
+
+          {order.guest && (
+            <p className="border border-black bg-mzik-lavender/40 px-3 py-2 text-xs font-semibold uppercase leading-5 text-black">
+              Non-transferable. QR is single-use and must match the guest name at entry.
+            </p>
+          )}
 
           <div className="grid gap-2">
             {order.items.map((item) => (
@@ -118,7 +128,7 @@ export function TicketPreview({ order }: { order: Order }) {
             </div>
           )}
           <p className="text-center text-xs uppercase text-black/50">{qrCodeUrl ? 'Scan at entry' : 'QR placeholder'}</p>
-          <Button className="w-full" onClick={downloadTicket} variant="outline">
+          <Button className="hidden w-full md:inline-flex" onClick={downloadTicket} variant="outline">
             <Download size={16} />
             Download my ticket
           </Button>
@@ -216,6 +226,7 @@ function createTicketHtml({
       .guest { border-top: 1px solid #000; margin-top: 24px; padding-top: 22px; }
       .guest-name { margin-top: 8px; font-size: 26px; font-weight: 700; text-transform: uppercase; }
       .muted { color: rgba(0,0,0,.62); margin-top: 6px; }
+      .notice { border: 1px solid #000; background: #ece8ff; margin-top: 18px; padding: 10px 12px; font-size: 12px; font-weight: 700; line-height: 1.45; text-transform: uppercase; }
       .line-items { display: grid; gap: 8px; margin-top: 20px; }
       .line-item { display: flex; justify-content: space-between; gap: 16px; border: 1px solid #000; padding: 10px 12px; }
       .qr { width: 100%; border: 1px solid #000; padding: 12px; }
@@ -246,6 +257,7 @@ function createTicketHtml({
             <p class="guest-name">${escapeHtml(order.buyer.fullName || 'Guest')}</p>
             <p class="muted">${escapeHtml(guestLine || '')}</p>
           </div>
+          ${order.guest ? '<p class="notice">Non-transferable. QR is single-use and must match the guest name at entry.</p>' : ''}
           <div class="line-items">${lineItems}</div>
         </div>
         <aside>
