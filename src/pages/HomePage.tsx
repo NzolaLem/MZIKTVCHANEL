@@ -41,7 +41,7 @@ export function HomePage() {
                 Mzik Off The Record
               </p>
               <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-white/58">
-                Enter your guest details and event code to unlock your ticket immediately.
+                Enter your guest details and party password to unlock your ticket immediately.
               </p>
             </div>
             <InviteAccessSection onContinue={enterMainWebsite} />

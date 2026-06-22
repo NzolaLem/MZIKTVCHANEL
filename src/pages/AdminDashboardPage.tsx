@@ -13,11 +13,14 @@ import {
   getGuestList,
   loginAdmin,
   normalizeGuestName,
-  normalizeInviteCode,
   saveAdminGuest,
+  saveAdminGuests,
   type AdminSession,
+  type BulkAdminGuestInput,
+  type BulkGuestCredential,
   type CheckinRecord,
   type RegisteredGuest,
+  type SkippedGuestImport,
 } from '../data/invites'
 import { formatEventDate } from '../lib/dates'
 import { cn } from '../lib/cn'
@@ -27,15 +30,17 @@ const adminSessionStorageKey = 'mzik-admin-session-v1'
 const genderOptions: Array<{ label: string; value: GuestGender }> = [
   { label: 'Female', value: 'female' },
   { label: 'Male', value: 'male' },
-  { label: 'Non-binary', value: 'non_binary' },
-  { label: 'Prefer not to say', value: 'prefer_not_to_say' },
 ]
 
 type AdminGuestForm = {
   fullName: string
   gender: GuestGender
-  accessCode: string
   password: string
+  ticketTypeId: string
+}
+
+type BulkImportDefaults = {
+  gender: GuestGender
   ticketTypeId: string
 }
 
@@ -62,16 +67,24 @@ export function AdminDashboardPage() {
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isLoadingGuests, setIsLoadingGuests] = useState(false)
   const [isCreatingGuest, setIsCreatingGuest] = useState(false)
+  const [isImportingGuests, setIsImportingGuests] = useState(false)
   const [isCheckingIn, setIsCheckingIn] = useState(false)
   const [guests, setGuests] = useState<RegisteredGuest[]>([])
   const [checkins, setCheckins] = useState<CheckinRecord[]>([])
   const [ticketToken, setTicketToken] = useState('')
   const [checkinMessage, setCheckinMessage] = useState<CheckinMessage | null>(null)
   const [lastTemporaryPassword, setLastTemporaryPassword] = useState('')
+  const [bulkText, setBulkText] = useState('')
+  const [bulkDefaults, setBulkDefaults] = useState<BulkImportDefaults>(() => ({
+    gender: 'male',
+    ticketTypeId: featuredEvent.ticketTypes[0]?.id ?? 'general',
+  }))
+  const [bulkCredentials, setBulkCredentials] = useState<BulkGuestCredential[]>([])
+  const [bulkSkipped, setBulkSkipped] = useState<SkippedGuestImport[]>([])
+  const [bulkError, setBulkError] = useState('')
   const [form, setForm] = useState<AdminGuestForm>(() => ({
     fullName: '',
     gender: 'male',
-    accessCode: 'LIVE-258',
     password: generateGuestPassword(),
     ticketTypeId: featuredEvent.ticketTypes[0]?.id ?? 'general',
   }))
@@ -97,6 +110,11 @@ export function AdminDashboardPage() {
     setForm((current) => ({ ...current, [field]: value }))
     setErrors((current) => ({ ...current, [field]: undefined, form: undefined }))
     setLastTemporaryPassword('')
+  }
+
+  const updateBulkDefault = <Field extends keyof BulkImportDefaults>(field: Field, value: BulkImportDefaults[Field]) => {
+    setBulkDefaults((current) => ({ ...current, [field]: value }))
+    setBulkError('')
   }
 
   const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -217,7 +235,6 @@ export function AdminDashboardPage() {
     }
 
     const fullName = form.fullName.trim()
-    const accessCode = normalizeInviteCode(form.accessCode)
     const password = form.password.trim()
     const nextErrors: AdminErrors = {}
 
@@ -225,20 +242,14 @@ export function AdminDashboardPage() {
       nextErrors.fullName = 'Guest name is required.'
     }
 
-    if (!accessCode) {
-      nextErrors.accessCode = 'Invite code is required.'
-    }
-
     if (password.length < 6) {
       nextErrors.password = 'Use at least 6 characters.'
     }
 
-    const isDuplicate = guests.some(
-      (guest) => normalizeGuestName(guest.fullName) === normalizeGuestName(fullName) && normalizeInviteCode(guest.accessCode) === accessCode,
-    )
+    const isDuplicate = guests.some((guest) => normalizeGuestName(guest.fullName) === normalizeGuestName(fullName))
 
     if (isDuplicate) {
-      nextErrors.form = 'This guest already has this invite code.'
+      nextErrors.form = 'This guest name is already on the guest list.'
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -253,7 +264,6 @@ export function AdminDashboardPage() {
         {
           fullName,
           gender: form.gender,
-          accessCode,
           password,
           ticketTypeId: form.ticketTypeId,
         },
@@ -272,6 +282,58 @@ export function AdminDashboardPage() {
     } finally {
       setIsCreatingGuest(false)
     }
+  }
+
+  const importGuests = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!session?.token) {
+      return
+    }
+
+    const parsed = parseBulkGuestLines(bulkText, bulkDefaults)
+
+    if (parsed.errors.length > 0) {
+      setBulkError(parsed.errors.slice(0, 5).join(' '))
+      setBulkCredentials([])
+      setBulkSkipped([])
+      return
+    }
+
+    setIsImportingGuests(true)
+    setBulkError('')
+
+    try {
+      const result = await saveAdminGuests(parsed.guests, session.token)
+      setBulkText('')
+      setBulkCredentials(result.credentials)
+      setBulkSkipped(result.skipped)
+      setGuests(await getGuestList(session.token))
+
+      if (result.credentials.length === 0 && result.skipped.length > 0) {
+        setBulkError('No new guests were imported because every name already exists.')
+      }
+    } catch (error) {
+      setBulkError(getErrorMessage(error))
+      setBulkCredentials([])
+      setBulkSkipped([])
+    } finally {
+      setIsImportingGuests(false)
+    }
+  }
+
+  const downloadBulkCredentials = () => {
+    if (bulkCredentials.length === 0) {
+      return
+    }
+
+    const blob = new Blob([formatCredentialCsv(bulkCredentials)], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `mzik-guest-passwords-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   const removeGuest = async (guestId: string) => {
@@ -362,64 +424,55 @@ export function AdminDashboardPage() {
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[0.72fr_1.28fr]">
-          <form className="grid gap-5 border border-black bg-white p-5 md:p-6" onSubmit={createGuest}>
-            <div>
-              <p className="inline-flex items-center gap-2 bg-black px-3 py-2 text-xs font-semibold uppercase text-white">
-                <ShieldCheck size={15} />
-                Create guest
-              </p>
-              <h2 className="mt-4 text-3xl font-semibold uppercase leading-none">Name, code, password</h2>
-            </div>
-
-            <AdminField
-              error={errors.fullName}
-              label="Guest name"
-              maxLength={80}
-              name="admin-guest-name"
-              onChange={(value) => updateField('fullName', value)}
-              placeholder="Name on the guest list"
-              value={form.fullName}
-            />
-
-            <div className="grid gap-2">
-              <span className="text-xs font-semibold uppercase text-black/65">Gender</span>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {genderOptions.map((option) => {
-                  const isSelected = form.gender === option.value
-
-                  return (
-                    <label
-                      className={cn(
-                        'flex min-h-11 cursor-pointer items-center justify-center border px-3 py-2 text-center text-xs font-semibold uppercase transition',
-                        isSelected ? 'border-black bg-black text-white' : 'border-black bg-white text-black hover:bg-black hover:text-white',
-                      )}
-                      key={option.value}
-                    >
-                      <input
-                        checked={isSelected}
-                        className="sr-only"
-                        name="admin-gender"
-                        onChange={() => updateField('gender', option.value)}
-                        type="radio"
-                        value={option.value}
-                      />
-                      {option.label}
-                    </label>
-                  )
-                })}
+          <div className="grid gap-5">
+            <form className="grid gap-5 border border-black bg-white p-5 md:p-6" onSubmit={createGuest}>
+              <div>
+                <p className="inline-flex items-center gap-2 bg-black px-3 py-2 text-xs font-semibold uppercase text-white">
+                  <ShieldCheck size={15} />
+                  Create guest
+                </p>
+                <h2 className="mt-4 text-3xl font-semibold uppercase leading-none">Name and password</h2>
               </div>
-            </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
               <AdminField
-                error={errors.accessCode}
-                label="Invite code"
-                maxLength={24}
-                name="admin-code"
-                onChange={(value) => updateField('accessCode', value)}
-                placeholder="LIVE-258"
-                value={form.accessCode}
+                error={errors.fullName}
+                label="Guest name"
+                maxLength={80}
+                name="admin-guest-name"
+                onChange={(value) => updateField('fullName', value)}
+                placeholder="Name on the guest list"
+                value={form.fullName}
               />
+
+              <div className="grid gap-2">
+                <span className="text-xs font-semibold uppercase text-black/65">Gender</span>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {genderOptions.map((option) => {
+                    const isSelected = form.gender === option.value
+
+                    return (
+                      <label
+                        className={cn(
+                          'flex min-h-11 cursor-pointer items-center justify-center border px-3 py-2 text-center text-xs font-semibold uppercase transition',
+                          isSelected ? 'border-black bg-black text-white' : 'border-black bg-white text-black hover:bg-black hover:text-white',
+                        )}
+                        key={option.value}
+                      >
+                        <input
+                          checked={isSelected}
+                          className="sr-only"
+                          name="admin-gender"
+                          onChange={() => updateField('gender', option.value)}
+                          type="radio"
+                          value={option.value}
+                        />
+                        {option.label}
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+
               <AdminField
                 error={errors.password}
                 label="Party password"
@@ -429,43 +482,134 @@ export function AdminDashboardPage() {
                 placeholder="TRIUNFO10"
                 value={form.password}
               />
-            </div>
 
-            <label className="grid gap-2" htmlFor="admin-ticket-type">
-              <span className="text-xs font-semibold uppercase text-black/65">Ticket tier</span>
-              <select
-                className="h-12 border border-black bg-white px-4 text-sm font-semibold uppercase outline-none focus:bg-mzik-lavender/40"
-                id="admin-ticket-type"
-                onChange={(event) => updateField('ticketTypeId', event.target.value)}
-                value={form.ticketTypeId}
-              >
-                {featuredEvent.ticketTypes.map((ticketType) => (
-                  <option key={ticketType.id} value={ticketType.id}>
-                    {ticketType.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <label className="grid gap-2" htmlFor="admin-ticket-type">
+                <span className="text-xs font-semibold uppercase text-black/65">Ticket tier</span>
+                <select
+                  className="h-12 border border-black bg-white px-4 text-sm font-semibold uppercase outline-none focus:bg-mzik-lavender/40"
+                  id="admin-ticket-type"
+                  onChange={(event) => updateField('ticketTypeId', event.target.value)}
+                  value={form.ticketTypeId}
+                >
+                  {featuredEvent.ticketTypes.map((ticketType) => (
+                    <option key={ticketType.id} value={ticketType.id}>
+                      {ticketType.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            {errors.form && <p className="border border-mzik-red bg-mzik-red px-4 py-3 text-sm font-semibold text-white">{errors.form}</p>}
+              {errors.form && <p className="border border-mzik-red bg-mzik-red px-4 py-3 text-sm font-semibold text-white">{errors.form}</p>}
 
-            {lastTemporaryPassword && (
-              <p className="border border-black bg-mzik-lavender/40 px-4 py-3 text-sm font-semibold text-black">
-                Latest password to send: {lastTemporaryPassword}
-              </p>
-            )}
+              {lastTemporaryPassword && (
+                <p className="border border-black bg-mzik-lavender/40 px-4 py-3 text-sm font-semibold text-black">
+                  Latest password to send: {lastTemporaryPassword}
+                </p>
+              )}
 
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-              <Button disabled={isCreatingGuest} type="submit" variant="dark">
-                {isCreatingGuest ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
-                Create guest
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <Button disabled={isCreatingGuest} type="submit" variant="dark">
+                  {isCreatingGuest ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
+                  Create guest
+                </Button>
+                <Button onClick={() => updateField('password', generateGuestPassword())} variant="outline">
+                  <KeyRound size={16} />
+                  Generate password
+                </Button>
+              </div>
+            </form>
+
+            <form className="grid gap-5 border border-black bg-white p-5 md:p-6" onSubmit={importGuests}>
+              <div>
+                <p className="inline-flex items-center gap-2 bg-black px-3 py-2 text-xs font-semibold uppercase text-white">
+                  <UsersRound size={15} />
+                  Bulk create
+                </p>
+                <h2 className="mt-4 text-3xl font-semibold uppercase leading-none">Paste guest list</h2>
+                <p className="mt-3 text-sm leading-6 text-black/60">
+                  One guest per line. Optional columns: name, gender, ticket tier, password.
+                </p>
+              </div>
+
+              <label className="grid gap-2" htmlFor="bulk-guest-list">
+                <span className="text-xs font-semibold uppercase text-black/65">Guest lines</span>
+                <textarea
+                  className="min-h-52 resize-y border border-black bg-white px-4 py-3 text-sm outline-none transition placeholder:text-black/35 focus:bg-mzik-lavender/40"
+                  id="bulk-guest-list"
+                  onChange={(event) => {
+                    setBulkText(event.target.value)
+                    setBulkError('')
+                  }}
+                  placeholder={'Ana Machel, female, vip\nNelson Dube, male, general\nZara Macamo'}
+                  value={bulkText}
+                />
+              </label>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2" htmlFor="bulk-default-gender">
+                  <span className="text-xs font-semibold uppercase text-black/65">Default gender</span>
+                  <select
+                    className="h-12 border border-black bg-white px-4 text-sm font-semibold uppercase outline-none focus:bg-mzik-lavender/40"
+                    id="bulk-default-gender"
+                    onChange={(event) => updateBulkDefault('gender', event.target.value as GuestGender)}
+                    value={bulkDefaults.gender}
+                  >
+                    {genderOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="grid gap-2" htmlFor="bulk-default-ticket-type">
+                  <span className="text-xs font-semibold uppercase text-black/65">Default tier</span>
+                  <select
+                    className="h-12 border border-black bg-white px-4 text-sm font-semibold uppercase outline-none focus:bg-mzik-lavender/40"
+                    id="bulk-default-ticket-type"
+                    onChange={(event) => updateBulkDefault('ticketTypeId', event.target.value)}
+                    value={bulkDefaults.ticketTypeId}
+                  >
+                    {featuredEvent.ticketTypes.map((ticketType) => (
+                      <option key={ticketType.id} value={ticketType.id}>
+                        {ticketType.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              {bulkError && <p className="border border-mzik-red bg-mzik-red px-4 py-3 text-sm font-semibold text-white">{bulkError}</p>}
+
+              {bulkCredentials.length > 0 && (
+                <div className="grid gap-3 border border-black bg-mzik-lavender/40 p-4">
+                  <p className="text-sm font-semibold uppercase text-black">
+                    Imported {bulkCredentials.length} guest{bulkCredentials.length === 1 ? '' : 's'}. Download these passwords now.
+                  </p>
+                  <textarea
+                    className="min-h-32 resize-y border border-black bg-white px-3 py-2 font-mono text-xs outline-none"
+                    readOnly
+                    value={formatCredentialCsv(bulkCredentials)}
+                  />
+                  <Button onClick={downloadBulkCredentials} variant="outline">
+                    <KeyRound size={16} />
+                    Download password CSV
+                  </Button>
+                </div>
+              )}
+
+              {bulkSkipped.length > 0 && (
+                <p className="border border-black bg-white px-4 py-3 text-sm font-semibold text-black">
+                  Skipped {bulkSkipped.length} existing guest{bulkSkipped.length === 1 ? '' : 's'}.
+                </p>
+              )}
+
+              <Button disabled={isImportingGuests} type="submit" variant="dark">
+                {isImportingGuests ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
+                Import guests
               </Button>
-              <Button onClick={() => updateField('password', generateGuestPassword())} variant="outline">
-                <KeyRound size={16} />
-                Generate password
-              </Button>
-            </div>
-          </form>
+            </form>
+          </div>
 
           <section className="grid gap-5">
             <form className="grid gap-4 border border-black bg-white p-5 md:p-6" onSubmit={submitCheckin}>
@@ -557,15 +701,14 @@ export function AdminDashboardPage() {
               </div>
               <div className="grid">
                 {guests.map((guest) => (
-                  <article className="grid gap-4 border-b border-black p-4 last:border-b-0 xl:grid-cols-[1fr_0.72fr_auto] xl:items-center" key={guest.id}>
+                  <article className="grid gap-4 border-b border-black p-4 last:border-b-0 xl:grid-cols-[1fr_0.4fr_auto] xl:items-center" key={guest.id}>
                     <div>
                       <p className="text-lg font-semibold uppercase">{guest.fullName}</p>
                       <p className="mt-1 text-xs font-semibold uppercase text-black/50">
                         {formatGender(guest.gender)} / {guest.inviteLabel}
                       </p>
                     </div>
-                    <div className="grid gap-2 text-sm md:grid-cols-2">
-                      <AccessPill label="Code" value={guest.accessCode} />
+                    <div className="grid gap-2 text-sm">
                       <AccessPill label="Password" value={guest.passwordStatus} />
                     </div>
                     {guest.source === 'admin' ? (
@@ -774,11 +917,132 @@ function formatGender(gender: GuestGender) {
   const labels: Record<GuestGender, string> = {
     female: 'Female',
     male: 'Male',
-    non_binary: 'Non-binary',
-    prefer_not_to_say: 'Prefer not to say',
   }
 
   return labels[gender]
+}
+
+function parseBulkGuestLines(text: string, defaults: BulkImportDefaults): { guests: BulkAdminGuestInput[]; errors: string[] } {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line, index) => ({ line: line.trim(), lineNumber: index + 1 }))
+    .filter((entry) => entry.line.length > 0)
+  const errors: string[] = []
+  const guests: BulkAdminGuestInput[] = []
+  const seenNames = new Set<string>()
+
+  if (lines.length === 0) {
+    return { guests, errors: ['Paste at least one guest name.'] }
+  }
+
+  if (lines.length > 500) {
+    return { guests, errors: ['Import 500 guests or fewer at a time.'] }
+  }
+
+  for (const entry of lines) {
+    const columns = splitGuestLine(entry.line)
+    const fullName = columns[0]?.trim().replace(/\s+/g, ' ') ?? ''
+    const normalizedName = normalizeGuestName(fullName)
+    const gender = parseGenderColumn(columns[1] ?? '', defaults.gender)
+    const ticketTypeId = parseTicketTypeColumn(columns[2] ?? '', defaults.ticketTypeId)
+    const password = columns[3]?.trim()
+
+    if (!fullName) {
+      errors.push(`Line ${entry.lineNumber}: guest name is required.`)
+      continue
+    }
+
+    if (fullName.length > 80) {
+      errors.push(`Line ${entry.lineNumber}: guest name is too long.`)
+      continue
+    }
+
+    if (seenNames.has(normalizedName)) {
+      errors.push(`Line ${entry.lineNumber}: ${fullName} appears more than once.`)
+      continue
+    }
+
+    if (!gender) {
+      errors.push(`Line ${entry.lineNumber}: gender must be female or male.`)
+      continue
+    }
+
+    if (!ticketTypeId) {
+      errors.push(`Line ${entry.lineNumber}: ticket tier was not recognized.`)
+      continue
+    }
+
+    if (password && password.length < 6) {
+      errors.push(`Line ${entry.lineNumber}: password must be at least 6 characters.`)
+      continue
+    }
+
+    seenNames.add(normalizedName)
+    guests.push({
+      fullName,
+      gender,
+      password: password || undefined,
+      ticketTypeId,
+    })
+  }
+
+  return { guests, errors }
+}
+
+function splitGuestLine(line: string) {
+  return line.includes('\t') ? line.split('\t') : line.split(',')
+}
+
+function parseGenderColumn(value: string, defaultGender: GuestGender): GuestGender | null {
+  const normalizedValue = value.trim().toLocaleLowerCase()
+
+  if (!normalizedValue) {
+    return defaultGender
+  }
+
+  if (['female', 'f', 'woman', 'women'].includes(normalizedValue)) {
+    return 'female'
+  }
+
+  if (['male', 'm', 'man', 'men'].includes(normalizedValue)) {
+    return 'male'
+  }
+
+  return null
+}
+
+function parseTicketTypeColumn(value: string, defaultTicketTypeId: string) {
+  const normalizedValue = normalizeToken(value)
+
+  if (!normalizedValue) {
+    return defaultTicketTypeId
+  }
+
+  return featuredEvent.ticketTypes.find((ticketType) => {
+    return normalizeToken(ticketType.id) === normalizedValue || normalizeToken(ticketType.name) === normalizedValue
+  })?.id
+}
+
+function normalizeToken(value: string) {
+  return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function formatCredentialCsv(credentials: BulkGuestCredential[]) {
+  const rows = [
+    ['Guest name', 'Gender', 'Ticket tier', 'Password'],
+    ...credentials.map((credential) => [
+      credential.fullName,
+      formatGender(credential.gender),
+      featuredEvent.ticketTypes.find((ticketType) => ticketType.id === credential.ticketTypeId)?.name ?? credential.ticketTypeId,
+      credential.temporaryPassword,
+    ]),
+  ]
+
+  return rows.map((row) => row.map(escapeCsvCell).join(',')).join('\n')
+}
+
+function escapeCsvCell(value: string) {
+  return `"${value.replace(/"/g, '""')}"`
 }
 
 function readStoredSession() {

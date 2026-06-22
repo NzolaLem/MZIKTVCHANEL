@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, KeyRound, Loader2, LockKeyhole, QrCode, UserRound } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Loader2, LockKeyhole, QrCode, UserRound } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type HTMLInputTypeAttribute, type ReactNode } from 'react'
 import type { GuestGender, Order } from '../types'
 import { verifyGuestInvite } from '../data/invites'
@@ -10,14 +10,11 @@ import { TicketPreview } from './TicketPreview'
 const genderOptions: Array<{ label: string; value: GuestGender }> = [
   { label: 'Female', value: 'female' },
   { label: 'Male', value: 'male' },
-  { label: 'Non-binary', value: 'non_binary' },
-  { label: 'Prefer not to say', value: 'prefer_not_to_say' },
 ]
 
 const initialForm = {
   fullName: '',
   gender: '' as GuestGender | '',
-  inviteCode: '',
   password: '',
 }
 
@@ -59,7 +56,6 @@ export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order
     event.preventDefault()
 
     const fullName = form.fullName.trim()
-    const inviteCode = form.inviteCode.trim()
     const password = form.password.trim()
     const nextErrors: FormErrors = {}
 
@@ -71,10 +67,6 @@ export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order
 
     if (!form.gender) {
       nextErrors.gender = 'Select a gender.'
-    }
-
-    if (!inviteCode) {
-      nextErrors.inviteCode = 'Enter the invite code.'
     }
 
     if (!password) {
@@ -91,7 +83,6 @@ export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order
     const result = await verifyGuestInvite({
       fullName,
       gender: form.gender as GuestGender,
-      inviteCode,
       password,
     })
     setIsSubmitting(false)
@@ -105,7 +96,6 @@ export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order
     const nextForm = {
       ...form,
       fullName,
-      inviteCode,
       password,
     }
 
@@ -170,17 +160,6 @@ export function InviteAccessSection({ onContinue }: { onContinue?: (order: Order
             </div>
             {errors.gender && <span className="text-xs font-semibold text-mzik-red">{errors.gender}</span>}
           </div>
-
-          <Field
-            error={errors.inviteCode}
-            icon={<KeyRound size={17} />}
-            label="Invite code"
-            maxLength={24}
-            name="invite-code"
-            onChange={(value) => updateField('inviteCode', value)}
-            placeholder="LIVE-258"
-            value={form.inviteCode}
-          />
 
           <Field
             error={errors.password}
@@ -303,9 +282,9 @@ function LockedTicketPreview() {
       </div>
 
       <div className="relative z-10 grid gap-4 border-y border-dashed border-white/14 py-5">
-        <p className="text-sm font-semibold uppercase text-white/52">Name / Gender / Code / Password</p>
-        <div className="grid gap-3 sm:grid-cols-4">
-          {['Guest', 'Gender', 'Code', 'Password'].map((item) => (
+        <p className="text-sm font-semibold uppercase text-white/52">Name / Gender / Password</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {['Guest', 'Gender', 'Password'].map((item) => (
             <div className="border border-white/18 p-3" key={item}>
               <p className="text-[0.68rem] font-semibold uppercase text-white/35">{item}</p>
               <div className="mt-3 h-2 bg-white/18" />

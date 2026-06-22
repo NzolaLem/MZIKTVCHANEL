@@ -64,7 +64,7 @@ Returns the Triunfo HouseParty event details.
 
 `POST /api/invites/verify`
 
-Checks `fullName`, `gender`, `inviteCode`, and `password` against the guest list. On success it returns an order with a signed QR payload.
+Checks `fullName`, `gender`, and `password` against the guest list. On success it returns an order with a signed QR payload.
 
 `POST /api/admin/login`
 
@@ -76,7 +76,11 @@ Lists sanitized guest records. Requires `Authorization: Bearer <token>`.
 
 `POST /api/admin/guests`
 
-Creates a guest with name, gender, invite code, password, and ticket tier. Requires admin auth.
+Creates one guest with name, gender, password, and ticket tier. Requires admin auth.
+
+`POST /api/admin/guests/bulk`
+
+Creates up to 500 guests from a pasted/imported list. Missing passwords are generated and returned once for admin handoff. Existing guest names are skipped.
 
 `DELETE /api/admin/guests/:id`
 

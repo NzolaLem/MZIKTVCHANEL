@@ -4,7 +4,6 @@ export type RegisteredGuest = {
   id: string
   fullName: string
   gender: GuestGender
-  accessCode: string
   eventSlug: string
   ticketTypeId: string
   inviteLabel: string
@@ -31,7 +30,6 @@ export type CheckinResult = {
 export type AdminGuestInput = {
   fullName: string
   gender: GuestGender
-  accessCode: string
   password: string
   ticketTypeId: string
 }
@@ -39,8 +37,32 @@ export type AdminGuestInput = {
 export type InviteCredentialInput = {
   fullName: string
   gender: GuestGender
-  inviteCode: string
   password: string
+}
+
+export type BulkAdminGuestInput = {
+  fullName: string
+  gender: GuestGender
+  password?: string
+  ticketTypeId: string
+}
+
+export type BulkGuestCredential = {
+  fullName: string
+  gender: GuestGender
+  ticketTypeId: string
+  temporaryPassword: string
+}
+
+export type SkippedGuestImport = {
+  fullName: string
+  reason: string
+}
+
+export type BulkGuestImportResult = {
+  guests: RegisteredGuest[]
+  credentials: BulkGuestCredential[]
+  skipped: SkippedGuestImport[]
 }
 
 export type AdminSession = {
@@ -56,10 +78,6 @@ export class ApiError extends Error {
     this.name = 'ApiError'
     this.status = status
   }
-}
-
-export function normalizeInviteCode(code: string) {
-  return code.trim().toUpperCase().replace(/\s+/g, '-')
 }
 
 export function normalizeGuestName(name: string) {
@@ -138,9 +156,22 @@ export async function saveAdminGuest(input: AdminGuestInput, token: string) {
     token,
     body: {
       ...input,
-      accessCode: normalizeInviteCode(input.accessCode),
       fullName: input.fullName.trim().replace(/\s+/g, ' '),
       password: input.password.trim(),
+    },
+  })
+}
+
+export async function saveAdminGuests(guests: BulkAdminGuestInput[], token: string) {
+  return apiRequest<BulkGuestImportResult>('/api/admin/guests/bulk', {
+    method: 'POST',
+    token,
+    body: {
+      guests: guests.map((guest) => ({
+        ...guest,
+        fullName: guest.fullName.trim().replace(/\s+/g, ' '),
+        password: guest.password?.trim(),
+      })),
     },
   })
 }

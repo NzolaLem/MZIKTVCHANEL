@@ -35,7 +35,7 @@ export type BuyerDetails = {
   instagram?: string
 }
 
-export type GuestGender = 'female' | 'male' | 'non_binary' | 'prefer_not_to_say'
+export type GuestGender = 'female' | 'male'
 
 export type TicketLineItem = {
   ticketType: TicketType
@@ -49,7 +49,6 @@ export type Order = {
   buyer: BuyerDetails
   guest?: {
     gender: GuestGender
-    accessCode: string
     inviteLabel: string
   }
   subtotal: number

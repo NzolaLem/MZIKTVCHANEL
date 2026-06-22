@@ -20,7 +20,7 @@ export const events: MzikEvent[] = [
     importantInfo: [
       'Doors open at 8:00 PM.',
       'Digital ticket and matching ID required at entry.',
-      'Invite code is required to unlock a ticket.',
+      'Guest details and party password are required to unlock a ticket.',
     ],
     ticketTypes: [
       {
@@ -29,7 +29,7 @@ export const events: MzikEvent[] = [
         price: 0,
         description: 'Invite-only entry to Triunfo HouseParty.',
         includes: ['Guest-list access', 'Digital ticket', 'HouseParty entry'],
-        available: 86,
+        available: 300,
       },
       {
         id: 'vip',
@@ -37,7 +37,7 @@ export const events: MzikEvent[] = [
         price: 0,
         description: 'Priority invite access for selected guests.',
         includes: ['Priority entry', 'VIP guest-list access', 'MzikTV moment'],
-        available: 24,
+        available: 60,
       },
       {
         id: 'premium',
@@ -45,7 +45,7 @@ export const events: MzikEvent[] = [
         price: 0,
         description: 'Host-approved invite access for the private party.',
         includes: ['Host list confirmation', 'Private-room access', 'Digital QR ticket'],
-        available: 8,
+        available: 20,
       },
     ],
   },

@@ -13,7 +13,9 @@ const port = Number(process.env.API_PORT ?? process.env.PORT ?? 8787)
 const tokenSecret = process.env.TOKEN_SECRET ?? 'dev-mzik-ticket-secret-change-before-production'
 const adminPassword = process.env.ADMIN_PASSWORD ?? 'mzik-admin-dev'
 const tokenIssuer = 'mzik-ticket-api'
-const validGenders = new Set(['female', 'male', 'non_binary', 'prefer_not_to_say'])
+const validGenders = new Set(['female', 'male'])
+const defaultAccessCode = 'GUEST-LIST'
+const maxBulkGuests = 500
 const isProduction = process.env.NODE_ENV === 'production'
 
 const supabaseProjectId = cleanEnv(process.env.SUPABASE_PROJECT_ID)
@@ -35,7 +37,7 @@ const event = {
   status: 'available',
   description:
     'Mzik Off The Record: an invite-only MzikTV house party in Triunfo with limited guest-list access, music, style, and private-room energy.',
-  importantInfo: ['Doors open at 8:00 PM.', 'Digital ticket and matching ID required at entry.', 'Invite code is required to unlock a ticket.'],
+  importantInfo: ['Doors open at 8:00 PM.', 'Digital ticket and matching ID required at entry.', 'Guest details and party password are required to unlock a ticket.'],
   ticketTypes: [
     {
       id: 'general',
@@ -43,7 +45,7 @@ const event = {
       price: 0,
       description: 'Invite-only entry to Triunfo HouseParty.',
       includes: ['Guest-list access', 'Digital ticket', 'HouseParty entry'],
-      available: 86,
+      available: 300,
     },
     {
       id: 'vip',
@@ -51,7 +53,7 @@ const event = {
       price: 0,
       description: 'Priority invite access for selected guests.',
       includes: ['Priority entry', 'VIP guest-list access', 'MzikTV moment'],
-      available: 24,
+      available: 60,
     },
     {
       id: 'premium',
@@ -59,7 +61,7 @@ const event = {
       price: 0,
       description: 'Host-approved invite access for the private party.',
       includes: ['Host list confirmation', 'Private-room access', 'Digital QR ticket'],
-      available: 8,
+      available: 20,
     },
   ],
 }
@@ -69,7 +71,7 @@ const seedGuests = [
     id: 'seed-demo-general',
     fullName: 'Demo Guest',
     gender: 'male',
-    accessCode: 'LIVE-258',
+    accessCode: defaultAccessCode,
     password: 'TRIUNFO10',
     eventSlug: event.slug,
     ticketTypeId: 'general',
@@ -81,7 +83,7 @@ const seedGuests = [
     id: 'seed-demo-vip',
     fullName: 'VIP Guest',
     gender: 'female',
-    accessCode: 'VIP-MZIK',
+    accessCode: defaultAccessCode,
     password: 'VIP2026',
     eventSlug: event.slug,
     ticketTypeId: 'vip',
@@ -92,8 +94,8 @@ const seedGuests = [
   {
     id: 'seed-demo-host',
     fullName: 'Host Guest',
-    gender: 'prefer_not_to_say',
-    accessCode: 'PRESS-001',
+    gender: 'male',
+    accessCode: defaultAccessCode,
     password: 'HOSTONLY',
     eventSlug: event.slug,
     ticketTypeId: 'premium',
@@ -188,6 +190,12 @@ async function routeApiRequest(request, response, url) {
     return
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/admin/guests/bulk') {
+    await requireAdmin(request)
+    await createBulkGuestsRequest(request, response)
+    return
+  }
+
   const guestDeleteMatch = url.pathname.match(/^\/api\/admin\/guests\/([^/]+)$/)
   if (request.method === 'DELETE' && guestDeleteMatch) {
     await requireAdmin(request)
@@ -216,22 +224,29 @@ async function verifyInviteRequest(request, response) {
   const fullName = cleanDisplayName(String(body.fullName ?? ''))
   const normalizedName = normalizeGuestName(fullName)
   const gender = String(body.gender ?? '')
-  const accessCode = normalizeInviteCode(String(body.inviteCode ?? ''))
   const password = String(body.password ?? '').trim()
 
-  if (!fullName || !gender || !accessCode || !password) {
-    writeJson(response, 400, { error: 'Name, gender, invite code, and password are required.' })
+  if (!fullName || !gender || !password) {
+    writeJson(response, 400, { error: 'Name, gender, and password are required.' })
     return
   }
 
-  if (fullName.length > 80 || accessCode.length > 24 || password.length > 128 || !validGenders.has(gender)) {
+  if (fullName.length > 80 || password.length > 128 || !validGenders.has(gender)) {
     writeJson(response, 400, { error: 'Invite details are invalid.' })
     return
   }
 
-  const guest = await findGuest({ normalizedName, gender, accessCode })
+  const candidates = await findGuestCandidates({ normalizedName, gender })
+  let guest = null
 
-  if (!guest || !(await verifyPassword(password, guest.passwordHash))) {
+  for (const candidate of candidates) {
+    if (await verifyPassword(password, candidate.passwordHash)) {
+      guest = candidate
+      break
+    }
+  }
+
+  if (!guest) {
     writeJson(response, 401, { error: 'These invite details do not match the guest list.' })
     return
   }
@@ -260,57 +275,170 @@ async function loginAdminRequest(request, response) {
 }
 
 async function createGuestRequest(request, response) {
-  const supabase = getSupabase()
   const body = await readJsonBody(request)
-  const fullName = cleanDisplayName(String(body.fullName ?? ''))
-  const normalizedName = normalizeGuestName(fullName)
-  const gender = String(body.gender ?? '')
-  const accessCode = normalizeInviteCode(String(body.accessCode ?? ''))
-  const password = String(body.password ?? '').trim()
-  const ticketTypeId = String(body.ticketTypeId ?? 'general')
-  const ticketType = event.ticketTypes.find((candidate) => candidate.id === ticketTypeId)
+  const result = await createGuestEntries(
+    [
+      {
+        fullName: body.fullName,
+        gender: body.gender,
+        password: body.password,
+        ticketTypeId: body.ticketTypeId,
+      },
+    ],
+    { skipExisting: false },
+  )
 
-  if (
-    !fullName ||
-    fullName.length > 80 ||
-    !validGenders.has(gender) ||
-    !accessCode ||
-    accessCode.length > 24 ||
-    password.length < 6 ||
-    password.length > 128 ||
-    !ticketType
-  ) {
-    writeJson(response, 400, { error: 'Valid guest name, gender, code, password, and ticket tier are required.' })
+  if (result.created.length === 0) {
+    writeJson(response, 409, { error: result.skipped[0]?.reason ?? 'This guest is already on the guest list.' })
     return
   }
 
-  const guestRow = {
-    id: `guest-${randomUUID()}`,
-    full_name: fullName,
-    normalized_name: normalizedName,
-    gender,
-    access_code: accessCode,
-    event_slug: event.slug,
-    ticket_type_id: ticketTypeId,
-    invite_label: getInviteLabel(ticketTypeId),
-    source: 'admin',
-    password_hash: await hashPassword(password),
-    created_at: new Date().toISOString(),
-    checked_in_at: null,
+  writeJson(response, 201, {
+    guest: sanitizeGuest(result.created[0].guest),
+    temporaryPassword: result.created[0].temporaryPassword,
+  })
+}
+
+async function createBulkGuestsRequest(request, response) {
+  const body = await readJsonBody(request)
+  const guests = Array.isArray(body.guests) ? body.guests : []
+
+  if (guests.length === 0) {
+    writeJson(response, 400, { error: 'Paste at least one guest name.' })
+    return
   }
 
-  const { data, error } = await supabase.from('guests').insert(guestRow).select().single()
+  if (guests.length > maxBulkGuests) {
+    writeJson(response, 400, { error: `Import ${maxBulkGuests} guests or fewer at a time.` })
+    return
+  }
+
+  const result = await createGuestEntries(guests, { skipExisting: true, generateMissingPasswords: true })
+
+  writeJson(response, 201, {
+    guests: result.created.map((entry) => sanitizeGuest(entry.guest)),
+    credentials: result.created.map((entry) => ({
+      fullName: entry.guest.fullName,
+      gender: entry.guest.gender,
+      ticketTypeId: entry.guest.ticketTypeId,
+      temporaryPassword: entry.temporaryPassword,
+    })),
+    skipped: result.skipped,
+  })
+}
+
+async function createGuestEntries(inputs, { skipExisting, generateMissingPasswords = false }) {
+  const supabase = getSupabase()
+  const preparedGuests = []
+  const skipped = []
+  const seenNames = new Set()
+
+  for (let index = 0; index < inputs.length; index += 1) {
+    const input = inputs[index] ?? {}
+    const fullName = cleanDisplayName(String(input.fullName ?? ''))
+    const normalizedName = normalizeGuestName(fullName)
+    const gender = String(input.gender ?? '')
+    const rawPassword = String(input.password ?? '').trim()
+    const password = rawPassword || (generateMissingPasswords ? generateGuestPassword() : '')
+    const ticketTypeId = String(input.ticketTypeId ?? 'general')
+    const ticketType = event.ticketTypes.find((candidate) => candidate.id === ticketTypeId)
+    const labelPrefix = inputs.length > 1 ? `Line ${index + 1}: ` : ''
+
+    if (!fullName || fullName.length > 80 || !validGenders.has(gender) || password.length < 6 || password.length > 128 || !ticketType) {
+      throw requestError(400, `${labelPrefix}valid guest name, female/male gender, password, and ticket tier are required.`)
+    }
+
+    if (seenNames.has(normalizedName)) {
+      const reason = 'Duplicate name in this import.'
+
+      if (!skipExisting) {
+        throw requestError(409, reason)
+      }
+
+      skipped.push({ fullName, reason })
+      continue
+    }
+
+    seenNames.add(normalizedName)
+    preparedGuests.push({
+      id: `guest-${randomUUID()}`,
+      fullName,
+      normalizedName,
+      gender,
+      password,
+      ticketTypeId,
+    })
+  }
+
+  if (preparedGuests.length === 0) {
+    return { created: [], skipped }
+  }
+
+  const preparedNames = new Set(preparedGuests.map((guest) => guest.normalizedName))
+  const { data: existingRows, error: existingError } = await supabase.from('guests').select('full_name, normalized_name')
+
+  if (existingError) {
+    throw databaseError(existingError)
+  }
+
+  const existingNames = new Set((existingRows ?? []).filter((row) => preparedNames.has(row.normalized_name)).map((row) => row.normalized_name))
+  const guestsToCreate = []
+
+  for (const guest of preparedGuests) {
+    if (existingNames.has(guest.normalizedName)) {
+      const reason = 'Guest name already exists.'
+
+      if (!skipExisting) {
+        throw requestError(409, reason)
+      }
+
+      skipped.push({ fullName: guest.fullName, reason })
+      continue
+    }
+
+    guestsToCreate.push(guest)
+  }
+
+  if (guestsToCreate.length === 0) {
+    return { created: [], skipped }
+  }
+
+  const rows = await Promise.all(
+    guestsToCreate.map(async (guest) => ({
+      id: guest.id,
+      full_name: guest.fullName,
+      normalized_name: guest.normalizedName,
+      gender: guest.gender,
+      access_code: defaultAccessCode,
+      event_slug: event.slug,
+      ticket_type_id: guest.ticketTypeId,
+      invite_label: getInviteLabel(guest.ticketTypeId),
+      source: 'admin',
+      password_hash: await hashPassword(guest.password),
+      created_at: new Date().toISOString(),
+      checked_in_at: null,
+    })),
+  )
+
+  const { data, error } = await supabase.from('guests').insert(rows).select()
 
   if (error) {
     if (error.code === '23505') {
-      writeJson(response, 409, { error: 'This guest already has this invite code.' })
-      return
+      throw requestError(409, 'One or more guests are already on the guest list.')
     }
 
     throw databaseError(error)
   }
 
-  writeJson(response, 201, { guest: sanitizeGuest(rowToGuest(data)), temporaryPassword: password })
+  const passwordByGuestId = new Map(guestsToCreate.map((guest) => [guest.id, guest.password]))
+
+  return {
+    created: (data ?? []).map((row) => ({
+      guest: rowToGuest(row),
+      temporaryPassword: passwordByGuestId.get(row.id) ?? '',
+    })),
+    skipped,
+  }
 }
 
 async function deleteGuestRequest(response, guestId) {
@@ -476,21 +604,20 @@ async function listCheckins() {
   }))
 }
 
-async function findGuest({ normalizedName, gender, accessCode }) {
+async function findGuestCandidates({ normalizedName, gender }) {
   const supabase = getSupabase()
   const { data, error } = await supabase
     .from('guests')
     .select('*')
     .eq('normalized_name', normalizedName)
     .eq('gender', gender)
-    .eq('access_code', accessCode)
-    .maybeSingle()
+    .limit(5)
 
   if (error) {
     throw databaseError(error)
   }
 
-  return data ? rowToGuest(data) : null
+  return (data ?? []).map(rowToGuest)
 }
 
 async function findGuestById(guestId) {
@@ -595,7 +722,6 @@ function createOrder(guest, ticket) {
     },
     guest: {
       gender: guest.gender,
-      accessCode: guest.accessCode,
       inviteLabel: guest.inviteLabel,
     },
     subtotal: 0,
@@ -660,6 +786,13 @@ async function hashPassword(password) {
   const salt = randomBytes(16).toString('base64url')
   const hash = await scrypt(password, salt, 64)
   return `scrypt:${salt}:${Buffer.from(hash).toString('base64url')}`
+}
+
+function generateGuestPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const bytes = randomBytes(8)
+
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('')
 }
 
 async function verifyPassword(password, storedHash) {
@@ -833,7 +966,6 @@ function sanitizeGuest(guest) {
     id: guest.id,
     fullName: guest.fullName,
     gender: guest.gender,
-    accessCode: guest.accessCode,
     eventSlug: guest.eventSlug,
     ticketTypeId: guest.ticketTypeId,
     inviteLabel: guest.inviteLabel,
@@ -873,6 +1005,13 @@ function configurationError(publicMessage) {
   error.statusCode = 503
   error.publicMessage = publicMessage
   error.isConfigurationError = true
+  return error
+}
+
+function requestError(statusCode, publicMessage) {
+  const error = new Error(publicMessage)
+  error.statusCode = statusCode
+  error.publicMessage = publicMessage
   return error
 }
 

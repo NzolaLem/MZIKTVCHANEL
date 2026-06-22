@@ -90,11 +90,7 @@ export function TicketPreview({ order }: { order: Order }) {
             <p className="text-xs font-semibold uppercase text-black/55">{isInviteTicket ? 'Guest' : 'Buyer'}</p>
             <p className="mt-2 text-2xl font-semibold uppercase text-black">{order.buyer.fullName || 'Guest'}</p>
             {order.buyer.email && <p className="mt-1 text-sm text-black/60">{order.buyer.email}</p>}
-            {order.guest && (
-              <p className="mt-1 text-sm text-black/60">
-                {formatGender(order.guest.gender)} / {order.guest.accessCode}
-              </p>
-            )}
+            {order.guest && <p className="mt-1 text-sm text-black/60">{formatGender(order.guest.gender)}</p>}
           </div>
 
           <div className="grid gap-2">
@@ -148,8 +144,6 @@ function formatGender(gender: NonNullable<Order['guest']>['gender']) {
   const labels: Record<NonNullable<Order['guest']>['gender'], string> = {
     female: 'Female',
     male: 'Male',
-    non_binary: 'Non-binary',
-    prefer_not_to_say: 'Prefer not to say',
   }
 
   return labels[gender]
@@ -191,7 +185,7 @@ function createTicketHtml({
   order: Order
   qrCodeUrl: string
 }) {
-  const guestLine = order.guest ? `${formatGender(order.guest.gender)} / ${order.guest.accessCode}` : order.buyer.email
+  const guestLine = order.guest ? formatGender(order.guest.gender) : order.buyer.email
   const lineItems = order.items
     .map(
       (item) =>
